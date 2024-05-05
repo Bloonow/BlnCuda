@@ -17,23 +17,31 @@ int main(int argc, char* argv[]) {
     double *A = (double*)malloc(sizeof(double) * M * K * batchCount);
     double *B = (double*)malloc(sizeof(double) * K * N * batchCount);
     double *C = (double*)malloc(sizeof(double) * M * N * batchCount);
-    for (int i = 0; i < M * K * batchCount; i++) A[i] = i;  // 行主序(M,K)矩阵，仅逻辑上转置，可看成列主序(K,M)矩阵
-    for (int i = 0; i < K * N * batchCount; i++) B[i] = i;  // 行主序(K,N)矩阵，仅逻辑上转置，可看成列主序(N,K)矩阵
-    for (int i = 0; i < M * N * batchCount; i++) C[i] = 0;  // 行主序(M,N)矩阵，仅逻辑上转置，可看成列主序(N,M)矩阵
+    for (int i = 0; i < M * K * batchCount; i++) A[i] = i;  // 行主序(M,K)矩阵，可看成列主序(K,M)矩阵
+    for (int i = 0; i < K * N * batchCount; i++) B[i] = i;  // 行主序(K,N)矩阵，可看成列主序(N,K)矩阵
+    for (int i = 0; i < M * N * batchCount; i++) C[i] = 0;  // 行主序(M,N)矩阵，可看成列主序(N,M)矩阵
     for (int bidx = 0; bidx < batchCount; bidx++) {
-        printf("A[%d]\t=\t", bidx); for (int i = 0; i < M * K; i++) printf("%.1f\t", A[bidx*M*K+i]); printf("\n");
-        printf("B[%d]\t=\t", bidx); for (int i = 0; i < K * N; i++) printf("%.1f\t", B[bidx*K*N+i]); printf("\n");
+        printf("A[%d]\t=\t", bidx);
+        for (int i = 0; i < M * K; i++) printf("%.1f\t", A[bidx*M*K+i]);
+        printf("\n");
+        printf("B[%d]\t=\t", bidx);
+        for (int i = 0; i < K * N; i++) printf("%.1f\t", B[bidx*K*N+i]);
+        printf("\n");
     }
 
     double *d_A, *d_B, *d_C;
     cudaMalloc(&d_A, sizeof(double) * M * K * batchCount);
     cudaMalloc(&d_B, sizeof(double) * K * N * batchCount);
     cudaMalloc(&d_C, sizeof(double) * M * N * batchCount);
-    cublasSetMatrix(K, M * batchCount, sizeof(double), A, K, d_A, K);  // 看成列主序(K,M)矩阵时，应该使用的参数
-    cublasSetMatrix(N, K * batchCount, sizeof(double), B, N, d_B, N);  // 看成列主序(N,K)矩阵时，应该使用的参数
+    cublasSetMatrix(K, M * batchCount, sizeof(double), A, K, d_A, K);  // 看成列主序(K,M)矩阵
+    cublasSetMatrix(N, K * batchCount, sizeof(double), B, N, d_B, N);  // 看成列主序(N,K)矩阵
     for (int bidx = 0; bidx < batchCount; bidx++) {
-        printf("d_A[%d]\t=\t", bidx); dis_matrix<<<1,1>>>(&d_A[bidx*M*K], M * K); cudaDeviceSynchronize();
-        printf("d_B[%d]\t=\t", bidx); dis_matrix<<<1,1>>>(&d_B[bidx*K*N], K * N); cudaDeviceSynchronize();
+        printf("d_A[%d]\t=\t", bidx);
+        dis_matrix<<<1,1>>>(&d_A[bidx*M*K], M * K);
+        cudaDeviceSynchronize();
+        printf("d_B[%d]\t=\t", bidx);
+        dis_matrix<<<1,1>>>(&d_B[bidx*K*N], K * N);
+        cudaDeviceSynchronize();
     }
 
     double alpha = 1.0;
@@ -45,7 +53,9 @@ int main(int argc, char* argv[]) {
         batchCount);
 
     for (int bidx = 0; bidx < batchCount; bidx++) {
-        printf("d_C[%d]\t=\t", bidx); dis_matrix<<<1,1>>>(&d_C[bidx*M*N], M * N); cudaDeviceSynchronize();
+        printf("d_C[%d]\t=\t", bidx);
+        dis_matrix<<<1,1>>>(&d_C[bidx*M*N], M * N);
+        cudaDeviceSynchronize();
     }
 
     for (int bidx = 0; bidx < batchCount; bidx++) {
@@ -53,7 +63,9 @@ int main(int argc, char* argv[]) {
         cublasGetMatrix(M, N * batchCount, sizeof(double), d_C, M, C, M);
     }
     for (int bidx = 0; bidx < batchCount; bidx++) {
-        printf("C[%d]\t=\t", bidx); for (int i = 0; i < M * N; i++) printf("%.1f\t", C[bidx*M*N+i]); printf("\n");
+        printf("C[%d]\t=\t", bidx);
+        for (int i = 0; i < M * N; i++) printf("%.1f\t", C[bidx*M*N+i]);
+        printf("\n");
     }
     
     cudaFree(d_A);
