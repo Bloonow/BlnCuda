@@ -15,15 +15,9 @@ int main(int argc, char *argv[]) {
     for (int i = 0; i < K * N; i++) h_B[i] = i * 1.0;
     for (int i = 0; i < M * N; i++) h_C[i] = i * 1.0;
     for (int i = 0; i < M * N; i++) h_D[i] = 0.0;
-    printf("A\t=\t");
-    for (int i = 0; i < M * K; i++) printf("%.1f\t", h_A[i]);
-    printf("\n");
-    printf("B\t=\t");
-    for (int i = 0; i < K * N; i++) printf("%.1f\t", h_B[i]);
-    printf("\n");
-    printf("C\t=\t");
-    for (int i = 0; i < M * N; i++) printf("%.1f\t", h_C[i]);
-    printf("\n");
+    printf("A\t=\t"); for (int i = 0; i < M * K; i++) printf("%.1f\t", h_A[i]); printf("\n");
+    printf("B\t=\t"); for (int i = 0; i < K * N; i++) printf("%.1f\t", h_B[i]); printf("\n");
+    printf("C\t=\t"); for (int i = 0; i < M * N; i++) printf("%.1f\t", h_C[i]); printf("\n");
     
     float *A, *B, *C, *D;
     cudaMalloc(&A, sizeof(float) * M * K);
@@ -59,9 +53,7 @@ int main(int argc, char *argv[]) {
     cublasLtDestroy(handle);
 
     cudaMemcpy(h_D, D, sizeof(float) * M * N, cudaMemcpyDeviceToHost);
-    printf("D\t=\t");
-    for (int i = 0; i < M * N; i++) printf("%.1f\t", h_D[i]);
-    printf("\n");
+    printf("D\t=\t"); for (int i = 0; i < M * N; i++) printf("%.1f\t", h_D[i]); printf("\n");
     cudaFree(A);
     cudaFree(B);
     cudaFree(C);

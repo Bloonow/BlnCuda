@@ -28,11 +28,9 @@ int main(int argc, char* argv[]) {
         for (int i = 0; i < M * N; i++) C[bidx][i] = 0;    // 行主序(M,N)矩阵，可看成列主序(N,M)矩阵
     }
     for (int bidx = 0; bidx < batchCount; bidx++) {
-        printf("A[%d]\t=\t", bidx);
-        for (int i = 0; i < M * K; i++) printf("%.1f\t", A[bidx][i]);
+        printf("A[%d]\t=\t", bidx); for (int i = 0; i < M * K; i++) printf("%.1f\t", A[bidx][i]);
         printf("\n");
-        printf("B[%d]\t=\t", bidx);
-        for (int i = 0; i < K * N; i++) printf("%.1f\t", B[bidx][i]);
+        printf("B[%d]\t=\t", bidx); for (int i = 0; i < K * N; i++) printf("%.1f\t", B[bidx][i]); 
         printf("\n");
     }
 
@@ -80,17 +78,14 @@ int main(int argc, char* argv[]) {
     );
 
     for (int bidx = 0; bidx < batchCount; bidx++) {
-        printf("d_C[%d]\t=\t", bidx);
-        dis_matrix<<<1,1>>>(d_C_ptr[bidx], M * N);
-        cudaDeviceSynchronize();
+        printf("d_C[%d]\t=\t", bidx); dis_matrix<<<1,1>>>(d_C_ptr[bidx], M * N); cudaDeviceSynchronize();
     }
     for (int bidx = 0; bidx < batchCount; bidx++) {
         // 因为无法控制矩阵C进行转置，故输出结果C是列主序存储的(M,N)矩阵，其前导维数为M
         cublasGetMatrix(M, N, sizeof(double), d_C_ptr[bidx], M, C[bidx], M);
     }
     for (int bidx = 0; bidx < batchCount; bidx++) {
-        printf("C[%d]\t=\t", bidx);
-        for (int i = 0; i < M * N; i++) printf("%.1f\t", C[bidx][i]); 
+        printf("C[%d]\t=\t", bidx); for (int i = 0; i < M * N; i++) printf("%.1f\t", C[bidx][i]);
         printf("\n");
     }
 
