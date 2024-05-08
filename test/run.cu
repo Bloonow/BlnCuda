@@ -10,10 +10,10 @@ using check::matrix_same;
 int main(int argc, char *argv[]) {
     // 若数据规模太大，而显存空间不足分配，则会导致 Segmentation fault (core dumped)
     const float alpha = 1.f, beta = 0.f;
-    const int batchCount = 2;
-    const int M = 2048;
+    const int batchCount = 4;
+    const int M = 1024;
     const int N = 2048;
-    const int K = 2048;
+    const int K = 1024;
     const int aS = M * K, bS = K * N, cS = M * N;
 
     float *A, *B, *C0_ROW, *C0_COL, *C1, *C2;
