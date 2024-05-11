@@ -7,7 +7,7 @@
 #include <stdarg.h>
 
 template<typename Ty>
-Ty* Memory_Host(size_t num, Ty max_value = (Ty)(1)) {
+Ty* memory_host(size_t num, Ty max_value = (Ty)(1)) {
     static time_t start_time = 0;
     if (start_time == 0) {
         srand(time(&start_time));
@@ -20,7 +20,7 @@ Ty* Memory_Host(size_t num, Ty max_value = (Ty)(1)) {
 }
 
 template<typename Ty>
-Ty* Memory_Cuda(size_t num, Ty* host_ptr = nullptr) {
+Ty* memory_cuda(size_t num, Ty* host_ptr = nullptr) {
     Ty* ptr;
     cudaMalloc(&ptr, sizeof(Ty) * num);
     if (host_ptr != nullptr) {
@@ -29,7 +29,7 @@ Ty* Memory_Cuda(size_t num, Ty* host_ptr = nullptr) {
     return ptr;
 }
 
-void Free_Host(size_t length, ...) {
+void free_host(size_t length, ...) {
     va_list vlist;
     va_start(vlist, length);
     for (size_t i = 0; i < length; i++) {
@@ -39,7 +39,7 @@ void Free_Host(size_t length, ...) {
     va_end(vlist);
 }
 
-void Free_Cuda(size_t length, ...) {
+void free_cuda(size_t length, ...) {
     va_list vlist;
     va_start(vlist, length);
     for (size_t i = 0; i < length; i++) {
@@ -50,7 +50,7 @@ void Free_Cuda(size_t length, ...) {
 }
 
 template<typename Ty>
-bool Check_Same(Ty *ptr1, Ty *ptr2, size_t num, Ty error = 1e-5) {
+bool check_same(Ty *ptr1, Ty *ptr2, size_t num, Ty error = 1e-5) {
     for (size_t i = 0; i < num; i++) {
         if (abs(ptr1[i] - ptr2[i]) > error) return false;
     }
@@ -58,7 +58,7 @@ bool Check_Same(Ty *ptr1, Ty *ptr2, size_t num, Ty error = 1e-5) {
 }
 
 template<typename Ty>
-void Gemv(
+void gemv(
     int M, int N, const Ty alpha, const Ty beta,
     const Ty *A, const Ty *x, Ty *y
 ) {
