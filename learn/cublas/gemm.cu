@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <cuda.h>
 #include <cublas_v2.h>
-#include "helper.cu"
+#include "../helper.cu"
 
 int main(int argc, char *argv[]) {
     const size_t Batch = 4, M = 456, N = 987, K = 543;
