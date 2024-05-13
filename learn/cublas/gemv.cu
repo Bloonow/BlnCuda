@@ -16,7 +16,6 @@ int main(int argc, char *argv[]) {
 
     cublasHandle_t handle;
     cublasCreate_v2(&handle);
-    // cublasSgemv_v2(handle, CUBLAS_OP_N, M, N, &alpha, d_A, M, d_x, 1, &beta, d_y, 1);  // Batch = 1
     cublasSgemvStridedBatched(
         handle, CUBLAS_OP_N, M, N, &alpha, d_A, M, M * N, d_x, 1, N, &beta, d_y, 1, M, Batch
     );

@@ -50,10 +50,10 @@ bool check_same(Ty *ptr1, Ty *ptr2, size_t num, Ty error = 1e-4) {
     return true;
 }
 
-typedef enum {
+typedef enum Order {
     ROW_MAJOR = 0,
     COL_MAJOR = 1
-} StorageOrder_t;
+} Order_t;
 
 inline size_t row_index(size_t rid, size_t cid, size_t rows, size_t cols) {
     return rid * cols + cid;
@@ -65,16 +65,38 @@ inline size_t col_index(size_t rid, size_t cid, size_t rows, size_t cols) {
 
 template<typename Ty>
 void host_gemv(
-    size_t M, size_t N, StorageOrder_t A_order, Ty *A, Ty *x, Ty *y, Ty alpha, Ty beta, size_t batch_count
+    size_t M, size_t N, Order_t A_order, Ty *A, Ty *x, Ty *y, Ty alpha, Ty beta, size_t batch_count
 ) {
-    auto A_index = A_order == ROW_MAJOR ? row_index : col_index;
+    auto A_idx = A_order == ROW_MAJOR ? row_index : col_index;
     for (size_t bid = 0; bid < batch_count; bid++) {
         for (size_t rid = 0; rid < M; rid++) {
             Ty value = 0;
             for (size_t cid = 0; cid < N; cid++) {
-                value += A[bid * M * N + A_index(rid, cid, M, N)] * x[bid * N + cid];
+                value += A[bid * M * N + A_idx(rid, cid, M, N)] * x[bid * N + cid];
             }
             y[bid * M + rid] = alpha * value + beta * y[bid * M + rid];
+        }
+    }
+}
+
+template<typename Ty>
+void host_gemm(
+    size_t M, size_t N, size_t K, Order_t A_order, Order_t B_order, Order_t C_order,
+    Ty *A, Ty *B, Ty *C, Ty alpha, Ty beta, size_t batch_count
+) {
+    auto A_idx = A_order == ROW_MAJOR ? row_index : col_index;
+    auto B_idx = B_order == ROW_MAJOR ? row_index : col_index;
+    auto C_idx = C_order == ROW_MAJOR ? row_index : col_index;
+    for (size_t bid = 0; bid < batch_count; bid++) {
+        for (size_t rid = 0; rid < M; rid++) {
+            for (size_t cid = 0; cid < N; cid++) {
+                Ty value = 0;
+                for (size_t k = 0; k < K; k++) {
+                    value += A[bid * M * K + A_idx(rid, k, M, K)] * B[bid * K * N + B_idx(k, cid, K, N)];
+                }
+                C[bid * M * N + C_idx(rid, cid, M, N)] =
+                    alpha * value + beta * C[bid * M * N + C_idx(rid, cid, M, N)];
+            }
         }
     }
 }
