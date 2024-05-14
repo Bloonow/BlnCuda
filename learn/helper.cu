@@ -50,7 +50,7 @@ bool check_same(Ty *ptr1, Ty *ptr2, size_t num, Ty error = 1e-4) {
     return true;
 }
 
-typedef enum Order {
+typedef enum {
     ROW_MAJOR = 0,
     COL_MAJOR = 1
 } Order_t;
