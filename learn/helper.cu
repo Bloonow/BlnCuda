@@ -14,7 +14,9 @@ Ty* alloc_host_memory(size_t count, Ty max_init = (Ty)(1)) {
     if (init_time == 0) srand(time(&init_time));
     Ty* ptr = reinterpret_cast<Ty*>(malloc(sizeof(Ty) * count));
     for (size_t i = 0; i < count; i++) {
-        ptr[i] = static_cast<Ty>(static_cast<double>(rand()) / RAND_MAX * max_init);
+        Ty value = rand() % 2 == 0 ? 1 : -1;
+        value *= static_cast<Ty>(static_cast<double>(rand()) / RAND_MAX * max_init);
+        ptr[i] = value;
     }
     return ptr;
 }
