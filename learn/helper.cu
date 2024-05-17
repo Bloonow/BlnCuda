@@ -67,7 +67,8 @@ inline size_t col_index(size_t rid, size_t cid, size_t rows, size_t cols) {
 
 template<typename Ty>
 void host_gemv(
-    size_t M, size_t N, Order_t A_order, Ty *A, Ty *x, Ty *y, Ty alpha, Ty beta, size_t batch_count
+    size_t M, size_t N, Order_t A_order,
+    Ty *A, Ty *x, Ty *y, Ty alpha, Ty beta, size_t batch_count
 ) {
     auto A_idx = A_order == ROW_MAJOR ? row_index : col_index;
     for (size_t bid = 0; bid < batch_count; bid++) {
