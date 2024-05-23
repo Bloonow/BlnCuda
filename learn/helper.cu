@@ -44,10 +44,10 @@ void free_memory(size_t count, ...) {
     va_start(vlist, count);
     for (size_t i = 0; i < count; i++) {
         void *ptr = va_arg(vlist, void*);
-        // try free as gpu pointer
+        // free as cuda pointer
         cudaError_t status = cudaFree(ptr);
         // free as host pointer
-        if (status != 0) free(ptr);
+        if (status != cudaSuccess) free(ptr);
     }
     va_end(vlist);
 }
@@ -111,3 +111,6 @@ void host_gemm(
         }
     }
 }
+
+template<typename Ty>
+void host_matmul() {}
