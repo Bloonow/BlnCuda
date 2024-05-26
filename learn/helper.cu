@@ -65,12 +65,12 @@ typedef enum {
     COL_MAJOR = 1
 } Order_t;
 
-inline size_t row_index(size_t rid, size_t cid, size_t rows, size_t cols) {
-    return rid * cols + cid;
+inline size_t row_index(size_t bid, size_t rid, size_t cid, size_t rows, size_t cols) {
+    return bid * rows * cols + rid * cols + cid;
 }
 
-inline size_t col_index(size_t rid, size_t cid, size_t rows, size_t cols) {
-    return cid * rows + rid;
+inline size_t col_index(size_t bid, size_t rid, size_t cid, size_t rows, size_t cols) {
+    return bid * rows * cols + cid * rows + rid;
 }
 
 template<typename Ty>
@@ -83,7 +83,7 @@ void host_gemv(
         for (size_t rid = 0; rid < M; rid++) {
             Ty value = 0;
             for (size_t cid = 0; cid < N; cid++) {
-                value += A[bid * M * N + A_idx(rid, cid, M, N)] * x[bid * N + cid];
+                value += A[A_idx(bid, rid, cid, M, N)] * x[bid * N + cid];
             }
             y[bid * M + rid] = alpha * value + beta * y[bid * M + rid];
         }
@@ -103,14 +103,18 @@ void host_gemm(
             for (size_t cid = 0; cid < N; cid++) {
                 Ty value = 0;
                 for (size_t k = 0; k < K; k++) {
-                    value += A[bid * M * K + A_idx(rid, k, M, K)] * B[bid * K * N + B_idx(k, cid, K, N)];
+                    value += A[A_idx(bid, rid, k, M, K)] * B[B_idx(bid, k, cid, K, N)];
                 }
-                C[bid * M * N + C_idx(rid, cid, M, N)] =
-                    alpha * value + beta * C[bid * M * N + C_idx(rid, cid, M, N)];
+                C[C_idx(bid, rid, cid, M, N)] = alpha * value + beta * C[C_idx(bid, rid, cid, M, N)];
             }
         }
     }
 }
 
 template<typename Ty>
-void host_matmul() {}
+void host_matmul_relu(
+    size_t M, size_t N, size_t K, Order_t A_order, Order_t B_order, Order_t C_order,
+    Ty *A, Ty *B, Ty *C, Ty *bias, Ty alpha, Ty beta, size_t batch_count
+) {
+
+}
