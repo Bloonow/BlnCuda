@@ -53,9 +53,12 @@ void free_memory(size_t count, ...) {
 }
 
 template<typename Ty>
-bool check_same(Ty *ptr1, Ty *ptr2, size_t num, Ty error = 1e-4) {
+bool check_same(Ty *ptr1, Ty *ptr2, size_t num, Ty error = 1e-6) {
     for (size_t i = 0; i < num; i++) {
-        if (abs(ptr1[i] - ptr2[i]) > error) return false;
+        if (abs(ptr1[i] - ptr2[i]) > error) {
+            printf("[%ld], p1 = %f, p2 = %f, diff = %f\n", i, ptr1[i], ptr2[i], abs(ptr1[i] - ptr2[i]));
+            return false;
+        }
     }
     return true;
 }
@@ -113,8 +116,25 @@ void host_gemm(
 
 template<typename Ty>
 void host_matmul_relu(
-    size_t M, size_t N, size_t K, Order_t A_order, Order_t B_order, Order_t C_order,
-    Ty *A, Ty *B, Ty *C, Ty *bias, Ty alpha, Ty beta, size_t batch_count
+    size_t M, size_t N, size_t K, Order_t A_order, Order_t B_order, Order_t C_order, Order_t D_order,
+    Ty *A, Ty *B, Ty *C, Ty* D, Ty *bias, Ty alpha, Ty beta, size_t batch_count
 ) {
-
+    auto A_idx = A_order == ROW_MAJOR ? row_index : col_index;
+    auto B_idx = B_order == ROW_MAJOR ? row_index : col_index;
+    auto C_idx = C_order == ROW_MAJOR ? row_index : col_index;
+    auto D_idx = D_order == ROW_MAJOR ? row_index : col_index;
+    for (size_t bid = 0; bid < batch_count; bid++) {
+        for (size_t rid = 0; rid < M; rid++) {
+            for (size_t cid = 0; cid < N; cid++) {
+                Ty value = 0;
+                for (size_t k = 0; k < K; k++) {
+                    value += A[A_idx(bid, rid, k, M, K)] * B[B_idx(bid, k, cid, K, N)];
+                }
+                value = alpha * value + beta * C[C_idx(bid, rid, cid, M, N)];
+                value = value + bias[bid * M + rid];
+                value = value > 0 ? value : 0;
+                D[D_idx(bid, rid, cid, M, N)] = value;
+            }
+        }
+    }
 }

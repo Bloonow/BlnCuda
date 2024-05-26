@@ -24,68 +24,73 @@ int main(int argc, char *argv[]) {
     void *workspace = alloc_cuda_memory<char>(workspace_bytes / sizeof(char), nullptr);
 
     cublasLtHandle_t lt;
-    cublasStatus_t stat = cublasLtCreate(&lt);
+    cublasLtCreate(&lt);
 
     // 设置矩阵布局
-    cublasLtOrder_t order = CUBLASLT_ORDER_ROW;
+    cublasLtOrder_t order = CUBLASLT_ORDER_COL;
     cublasLtMatrixLayout_t A_layout, B_layout, C_layout, D_layout;
-    stat = cublasLtMatrixLayoutCreate(&A_layout, CUDA_R_32F, M, K, order == CUBLASLT_ORDER_COL ? M : K);
-    stat = cublasLtMatrixLayoutCreate(&B_layout, CUDA_R_32F, K, N, order == CUBLASLT_ORDER_COL ? K : N);
-    stat = cublasLtMatrixLayoutCreate(&C_layout, CUDA_R_32F, M, N, order == CUBLASLT_ORDER_COL ? M : N);
-    stat = cublasLtMatrixLayoutCreate(&D_layout, CUDA_R_32F, M, N, order == CUBLASLT_ORDER_COL ? M : N);
+    cublasLtMatrixLayoutCreate(&A_layout, CUDA_R_32F, M, K, order == CUBLASLT_ORDER_COL ? M : K);
+    cublasLtMatrixLayoutCreate(&B_layout, CUDA_R_32F, K, N, order == CUBLASLT_ORDER_COL ? K : N);
+    cublasLtMatrixLayoutCreate(&C_layout, CUDA_R_32F, M, N, order == CUBLASLT_ORDER_COL ? M : N);
+    cublasLtMatrixLayoutCreate(&D_layout, CUDA_R_32F, M, N, order == CUBLASLT_ORDER_COL ? M : N);
     // 设置行主序存储或列主序存储
-    stat = cublasLtMatrixLayoutSetAttribute(A_layout, CUBLASLT_MATRIX_LAYOUT_ORDER, &order, sizeof(order));
-    stat = cublasLtMatrixLayoutSetAttribute(B_layout, CUBLASLT_MATRIX_LAYOUT_ORDER, &order, sizeof(order));
-    stat = cublasLtMatrixLayoutSetAttribute(C_layout, CUBLASLT_MATRIX_LAYOUT_ORDER, &order, sizeof(order));
-    stat = cublasLtMatrixLayoutSetAttribute(D_layout, CUBLASLT_MATRIX_LAYOUT_ORDER, &order, sizeof(order));
+    cublasLtMatrixLayoutSetAttribute(A_layout, CUBLASLT_MATRIX_LAYOUT_ORDER, &order, sizeof(cublasLtOrder_t));
+    cublasLtMatrixLayoutSetAttribute(B_layout, CUBLASLT_MATRIX_LAYOUT_ORDER, &order, sizeof(cublasLtOrder_t));
+    cublasLtMatrixLayoutSetAttribute(C_layout, CUBLASLT_MATRIX_LAYOUT_ORDER, &order, sizeof(cublasLtOrder_t));
+    cublasLtMatrixLayoutSetAttribute(D_layout, CUBLASLT_MATRIX_LAYOUT_ORDER, &order, sizeof(cublasLtOrder_t));
     // 设置批量数目及跨步间距
-    stat = cublasLtMatrixLayoutSetAttribute(A_layout, CUBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &Batch, sizeof(Batch));
-    stat = cublasLtMatrixLayoutSetAttribute(B_layout, CUBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &Batch, sizeof(Batch));
-    stat = cublasLtMatrixLayoutSetAttribute(C_layout, CUBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &Batch, sizeof(Batch));
-    stat = cublasLtMatrixLayoutSetAttribute(D_layout, CUBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &Batch, sizeof(Batch));
+    cublasLtMatrixLayoutSetAttribute(A_layout, CUBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &Batch, sizeof(int32_t));
+    cublasLtMatrixLayoutSetAttribute(B_layout, CUBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &Batch, sizeof(int32_t));
+    cublasLtMatrixLayoutSetAttribute(C_layout, CUBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &Batch, sizeof(int32_t));
+    cublasLtMatrixLayoutSetAttribute(D_layout, CUBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &Batch, sizeof(int32_t));
     int64_t A_stride = M * K, B_stride = K * N, C_stride = M * N, D_stride = M * N;
-    stat = cublasLtMatrixLayoutSetAttribute(A_layout, CUBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET, &A_stride, sizeof(A_stride));
-    stat = cublasLtMatrixLayoutSetAttribute(B_layout, CUBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET, &B_stride, sizeof(B_stride));
-    stat = cublasLtMatrixLayoutSetAttribute(C_layout, CUBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET, &C_stride, sizeof(C_stride));
-    stat = cublasLtMatrixLayoutSetAttribute(D_layout, CUBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET, &D_stride, sizeof(D_stride));
+    cublasLtMatrixLayoutSetAttribute(A_layout, CUBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET, &A_stride, sizeof(int64_t));
+    cublasLtMatrixLayoutSetAttribute(B_layout, CUBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET, &B_stride, sizeof(int64_t));
+    cublasLtMatrixLayoutSetAttribute(C_layout, CUBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET, &C_stride, sizeof(int64_t));
+    cublasLtMatrixLayoutSetAttribute(D_layout, CUBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET, &D_stride, sizeof(int64_t));
 
     // 设置矩阵乘法计算配置
     cublasLtMatmulDesc_t matmul_desc;
-    stat = cublasLtMatmulDescCreate(&matmul_desc, CUBLAS_COMPUTE_32F, CUDA_R_32F);
+    cublasLtMatmulDescCreate(&matmul_desc, CUBLAS_COMPUTE_32F, CUDA_R_32F);
     // 设置矩阵乘法后置操作
     cublasLtEpilogue_t epilogue = CUBLASLT_EPILOGUE_RELU_AUX_BIAS;
     int64_t bitmask_stride = bitmask_ld * N;
-    stat = cublasLtMatmulDescSetAttribute(matmul_desc, CUBLASLT_MATMUL_DESC_EPILOGUE, &epilogue, sizeof(epilogue));
-    stat = cublasLtMatmulDescSetAttribute(matmul_desc, CUBLASLT_MATMUL_DESC_BIAS_POINTER, &d_bias, sizeof(d_bias));
-    stat = cublasLtMatmulDescSetAttribute(matmul_desc, CUBLASLT_MATMUL_DESC_BIAS_BATCH_STRIDE, &M, sizeof(M));
-    stat = cublasLtMatmulDescSetAttribute(matmul_desc, CUBLASLT_MATMUL_DESC_EPILOGUE_AUX_POINTER, &bitmask, sizeof(bitmask));
-    stat = cublasLtMatmulDescSetAttribute(matmul_desc, CUBLASLT_MATMUL_DESC_EPILOGUE_AUX_LD, &bitmask_ld, sizeof(bitmask_ld));
-    stat = cublasLtMatmulDescSetAttribute(
-        matmul_desc, CUBLASLT_MATMUL_DESC_EPILOGUE_AUX_BATCH_STRIDE, &bitmask_stride, sizeof(bitmask_stride)
+    cublasLtMatmulDescSetAttribute(matmul_desc, CUBLASLT_MATMUL_DESC_EPILOGUE, &epilogue, sizeof(cublasLtEpilogue_t));
+    cublasLtMatmulDescSetAttribute(matmul_desc, CUBLASLT_MATMUL_DESC_BIAS_POINTER, &d_bias, sizeof(const void*));
+    cublasLtMatmulDescSetAttribute(matmul_desc, CUBLASLT_MATMUL_DESC_BIAS_BATCH_STRIDE, &M, sizeof(int64_t));
+    cublasLtMatmulDescSetAttribute(matmul_desc, CUBLASLT_MATMUL_DESC_EPILOGUE_AUX_POINTER, &bitmask, sizeof(void*));
+    cublasLtMatmulDescSetAttribute(matmul_desc, CUBLASLT_MATMUL_DESC_EPILOGUE_AUX_LD, &bitmask_ld, sizeof(int64_t));
+    cublasLtMatmulDescSetAttribute(
+        matmul_desc, CUBLASLT_MATMUL_DESC_EPILOGUE_AUX_BATCH_STRIDE, &bitmask_stride, sizeof(int64_t)
     );
 
     // 搜索最佳的实现算法
     const int requestAlgoCount = 4;
     int returnAlgoCount = 0;
     cublasLtMatmulPreference_t preference;
-    stat = cublasLtMatmulPreferenceCreate(&preference);
-    stat = cublasLtMatmulPreferenceSetAttribute(
-        preference, CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, &workspace_bytes, sizeof(workspace_bytes)
+    cublasLtMatmulPreferenceCreate(&preference);
+    cublasLtMatmulPreferenceSetAttribute(
+        preference, CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, &workspace_bytes, sizeof(uint64_t)
     );
     cublasLtMatmulHeuristicResult_t heuristicResult[requestAlgoCount] = { 0 };
-    stat = cublasLtMatmulAlgoGetHeuristic(
+    cublasLtMatmulAlgoGetHeuristic(
         lt, matmul_desc, A_layout, B_layout, C_layout, D_layout, preference,
         requestAlgoCount, heuristicResult, &returnAlgoCount
     );
 
     // 矩阵乘法
-    stat = cublasLtMatmul(
+    cublasLtMatmul(
         lt, matmul_desc, &alpha, d_A, A_layout, d_B, B_layout, &beta, d_C, C_layout, d_D, D_layout,
         &heuristicResult[0].algo, workspace, workspace_bytes, nullptr
     );
     cudaMemcpy(ret_D, d_D, sizeof(float) * Batch * M * N, cudaMemcpyDeviceToHost);
 
     // 主机乘法验证
+    host_matmul_relu<float>(
+        M, N, K, COL_MAJOR, COL_MAJOR, COL_MAJOR, COL_MAJOR, h_A, h_B, h_C, h_D, h_bias, alpha, beta, Batch
+    );
+    bool same = check_same<float>(h_D, ret_D, Batch * M * N, 1e-4);
+    printf(same ? "|| SAME ||\n" : "|| NOT SAME ||\n");
 
     // 释放资源
     cublasLtMatmulPreferenceDestroy(preference);

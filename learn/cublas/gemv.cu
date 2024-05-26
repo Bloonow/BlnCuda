@@ -19,12 +19,12 @@ int main(int argc, char *argv[]) {
     cublasSgemvStridedBatched(
         handle, CUBLAS_OP_N, M, N, &alpha, d_A, M, M * N, d_x, 1, N, &beta, d_y, 1, M, Batch
     );
-    cublasGetVector(Batch * M, sizeof(float), d_y, 1, ret_y, 1);
+    cudaMemcpy(ret_y, d_y, sizeof(float) * Batch * M, cudaMemcpyDeviceToHost);
     cublasDestroy_v2(handle);
 
     host_gemv<float>(M, N, COL_MAJOR, h_A, h_x, h_y, alpha, beta, Batch);
-    bool same = check_same<float>(h_y, ret_y, Batch * M, 1e-2);
-    printf(same ? "SAME\n" : "NOT SAME\n");
+    bool same = check_same<float>(h_y, ret_y, Batch * M, 1e-3);
+    printf(same ? "|| SAME ||\n" : "|| NOT SAME ||\n");
 
     free_memory(7, h_A, h_x, h_y, ret_y, d_A, d_x, d_y);
     return 0;
