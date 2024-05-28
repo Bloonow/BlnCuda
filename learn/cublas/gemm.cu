@@ -4,8 +4,8 @@
 #include "../helper.cu"
 
 int main(int argc, char *argv[]) {
-    const size_t Batch = 4, M = 456, N = 987, K = 543;
-    const float alpha = 3.14, beta = 2.71;
+    size_t Batch = 4, M = 456, N = 987, K = 543;
+    float alpha = 3.14, beta = 2.71;
     float *h_A = alloc_host_memory<float>(Batch * M * K);
     float *h_B = alloc_host_memory<float>(Batch * K * N);
     float *h_C = alloc_host_memory<float>(Batch * M * N);
@@ -17,7 +17,7 @@ int main(int argc, char *argv[]) {
     cublasHandle_t handle;
     cublasCreate_v2(&handle);
     cublasSgemmStridedBatched(
-        handle, CUBLAS_OP_N, CUBLAS_OP_N, M, N, K, 
+        handle, CUBLAS_OP_N, CUBLAS_OP_N, M, N, K,
         &alpha, d_A, M, M * K, d_B, K, K * N, &beta, d_C, M, M * N, Batch
     );
     cudaMemcpy(ret_C, d_C, sizeof(float) * Batch * M * N, cudaMemcpyDeviceToHost);

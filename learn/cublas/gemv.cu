@@ -4,8 +4,8 @@
 #include "../helper.cu"
 
 int main(int argc, char *argv[]) {
-    const size_t Batch = 4, M = 456, N = 987;
-    const float alpha = 3.14, beta = 2.71;
+    size_t Batch = 4, M = 456, N = 987;
+    float alpha = 3.14, beta = 2.71;
     float *h_A = alloc_host_memory<float>(Batch * M * N);
     float *h_x = alloc_host_memory<float>(Batch * N);
     float *h_y = alloc_host_memory<float>(Batch * M);
