@@ -6,9 +6,6 @@
 
 namespace sgemm_32x32_4x8_SplitK {
 
-using buffer::SharedMemory;
-using buffer::GlobalBuffer;
-
 /**
  * [WHEN]   K > 256
  * [LIMIT]  split_num <= 32
@@ -537,7 +534,7 @@ __global__ void sgemm_rrr_kernel(
     const uint32_t M, const uint32_t N, const uint32_t K, const uint32_t aS, const uint32_t bS, const uint32_t cS,
     const uint32_t split_len
 ) {
-    float *smem_buf = SharedMemory<float, 1024 * 4>().pointer();
+    float *smem_buf = buffer::SharedMemory<float, 1024 * 4>().pointer();
     TileIndexSplitK T(M, N, K, aS, bS, cS, split_len);
     float Creg[2][4][4] = {};
     compute_block_rrr(Creg, smem_buf, A, B, alpha, T);
@@ -551,7 +548,7 @@ __global__ void sgemm_rrc_kernel(
     const uint32_t M, const uint32_t N, const uint32_t K, const uint32_t aS, const uint32_t bS, const uint32_t cS,
     const uint32_t split_len
 ) {
-    float *smem_buf = SharedMemory<float, 1024 * 4>().pointer();
+    float *smem_buf = buffer::SharedMemory<float, 1024 * 4>().pointer();
     TileIndexSplitK T(M, N, K, aS, bS, cS, split_len);
     float Creg[2][4][4] = {};
     compute_block_rrr(Creg, smem_buf, A, B, alpha, T);
@@ -565,7 +562,7 @@ __global__ void sgemm_rcr_kernel(
     const uint32_t M, const uint32_t N, const uint32_t K, const uint32_t aS, const uint32_t bS, const uint32_t cS,
     const uint32_t split_len
 ) {
-    float *smem_buf = SharedMemory<float, 1024 * 4>().pointer();
+    float *smem_buf = buffer::SharedMemory<float, 1024 * 4>().pointer();
     TileIndexSplitK T(M, N, K, aS, bS, cS, split_len);
     float Creg[2][4][4] = {};
     compute_block_rcr(Creg, smem_buf, A, B, alpha, T);
@@ -579,7 +576,7 @@ __global__ void sgemm_rcc_kernel(
     const uint32_t M, const uint32_t N, const uint32_t K, const uint32_t aS, const uint32_t bS, const uint32_t cS,
     const uint32_t split_len
 ) {
-    float *smem_buf = SharedMemory<float, 1024 * 4>().pointer();
+    float *smem_buf = buffer::SharedMemory<float, 1024 * 4>().pointer();
     TileIndexSplitK T(M, N, K, aS, bS, cS, split_len);
     float Creg[2][4][4] = {};
     compute_block_rcr(Creg, smem_buf, A, B, alpha, T);
@@ -593,7 +590,7 @@ __global__ void sgemm_crr_kernel(
     const uint32_t M, const uint32_t N, const uint32_t K, const uint32_t aS, const uint32_t bS, const uint32_t cS,
     const uint32_t split_len
 ) {
-    float *smem_buf = SharedMemory<float, 1024 * 4>().pointer();
+    float *smem_buf = buffer::SharedMemory<float, 1024 * 4>().pointer();
     TileIndexSplitK T(M, N, K, aS, bS, cS, split_len);
     float Creg[2][4][4] = {};
     compute_block_crr(Creg, smem_buf, A, B, alpha, T);
@@ -607,7 +604,7 @@ __global__ void sgemm_crc_kernel(
     const uint32_t M, const uint32_t N, const uint32_t K, const uint32_t aS, const uint32_t bS, const uint32_t cS,
     const uint32_t split_len
 ) {
-    float *smem_buf = SharedMemory<float, 1024 * 4>().pointer();
+    float *smem_buf = buffer::SharedMemory<float, 1024 * 4>().pointer();
     TileIndexSplitK T(M, N, K, aS, bS, cS, split_len);
     float Creg[2][4][4] = {};
     compute_block_crr(Creg, smem_buf, A, B, alpha, T);
@@ -621,7 +618,7 @@ __global__ void sgemm_ccr_kernel(
     const uint32_t M, const uint32_t N, const uint32_t K, const uint32_t aS, const uint32_t bS, const uint32_t cS,
     const uint32_t split_len
 ) {
-    float *smem_buf = SharedMemory<float, 1024 * 4>().pointer();
+    float *smem_buf = buffer::SharedMemory<float, 1024 * 4>().pointer();
     TileIndexSplitK T(M, N, K, aS, bS, cS, split_len);
     float Creg[2][4][4] = {};
     compute_block_ccr(Creg, smem_buf, A, B, alpha, T);
@@ -635,7 +632,7 @@ __global__ void sgemm_ccc_kernel(
     const uint32_t M, const uint32_t N, const uint32_t K, const uint32_t aS, const uint32_t bS, const uint32_t cS,
     const uint32_t split_len
 ) {
-    float *smem_buf = SharedMemory<float, 1024 * 4>().pointer();
+    float *smem_buf = buffer::SharedMemory<float, 1024 * 4>().pointer();
     TileIndexSplitK T(M, N, K, aS, bS, cS, split_len);
     float Creg[2][4][4] = {};
     compute_block_ccr(Creg, smem_buf, A, B, alpha, T);
@@ -678,7 +675,7 @@ __host__ void sgemm_cuda(
     }
     // 执行运算所需的缓冲区
     const size_t bytes = batchCount * split_num * M * N * sizeof(float);
-    float *SplitC = reinterpret_cast<float*>(GlobalBuffer::I().pointer(bytes));
+    float *SplitC = reinterpret_cast<float*>(buffer::GlobalBuffer::I().pointer(bytes));
 
     const dim3 block_size(128, 1, 1);
     const dim3 grid_size(((N + 31) / 32) * ((M + 31) / 32), split_num, batchCount);

@@ -7,8 +7,6 @@
 
 namespace sgemm_128x128_8x8 {
 
-using buffer::SharedMemory;
-
 /* [WHEN] General */
 struct TileIndex {
     uint32_t brid, bcid, tid, wid, lid;
@@ -565,7 +563,7 @@ __global__ void sgemm_rrr_kernel(
     const uint32_t M, const uint32_t N, const uint32_t K,
     const uint32_t aS, const uint32_t bS, const uint32_t cS
 ) {
-    float *smem_buf = SharedMemory<float, 1024 * 6>().pointer();
+    float *smem_buf = buffer::SharedMemory<float, 1024 * 6>().pointer();
     TileIndex T;
     float Creg[8][8] = {0.f};
     compute_block_rrr(
@@ -584,7 +582,7 @@ __global__ void sgemm_rrc_kernel(
     const uint32_t M, const uint32_t N, const uint32_t K,
     const uint32_t aS, const uint32_t bS, const uint32_t cS
 ) {
-    float *smem_buf = SharedMemory<float, 1024 * 6>().pointer();
+    float *smem_buf = buffer::SharedMemory<float, 1024 * 6>().pointer();
     TileIndex T;
     float Creg[8][8] = {0.f};
     compute_block_rrr(
@@ -603,7 +601,7 @@ __global__ void sgemm_rcr_kernel(
     const uint32_t M, const uint32_t N, const uint32_t K,
     const uint32_t aS, const uint32_t bS, const uint32_t cS
 ) {
-    float *smem_buf = SharedMemory<float, 1024 * 8>().pointer();
+    float *smem_buf = buffer::SharedMemory<float, 1024 * 8>().pointer();
     TileIndex T;
     float Creg[8][8] = {0.f};
     compute_block_rcr(
@@ -622,7 +620,7 @@ __global__ void sgemm_rcc_kernel(
     const uint32_t M, const uint32_t N, const uint32_t K,
     const uint32_t aS, const uint32_t bS, const uint32_t cS
 ) {
-    float *smem_buf = SharedMemory<float, 1024 * 8>().pointer();
+    float *smem_buf = buffer::SharedMemory<float, 1024 * 8>().pointer();
     TileIndex T;
     float Creg[8][8] = {0.f};
     compute_block_rcr(
@@ -641,7 +639,7 @@ __global__ void sgemm_crr_kernel(
     const uint32_t M, const uint32_t N, const uint32_t K,
     const uint32_t aS, const uint32_t bS, const uint32_t cS
 ) {
-    float *smem_buf = SharedMemory<float, 1024 * 4>().pointer();
+    float *smem_buf = buffer::SharedMemory<float, 1024 * 4>().pointer();
     TileIndex T;
     float Creg[8][8] = {0.f};
     compute_block_crr(
@@ -660,7 +658,7 @@ __global__ void sgemm_crc_kernel(
     const uint32_t M, const uint32_t N, const uint32_t K,
     const uint32_t aS, const uint32_t bS, const uint32_t cS
 ) {
-    float *smem_buf = SharedMemory<float, 1024 * 4>().pointer();
+    float *smem_buf = buffer::SharedMemory<float, 1024 * 4>().pointer();
     TileIndex T;
     float Creg[8][8] = {0.f};
     compute_block_crr(
@@ -679,7 +677,7 @@ __global__ void sgemm_ccr_kernel(
     const uint32_t M, const uint32_t N, const uint32_t K,
     const uint32_t aS, const uint32_t bS, const uint32_t cS
 ) {
-    float *smem_buf = SharedMemory<float, 1024 * 6>().pointer();
+    float *smem_buf = buffer::SharedMemory<float, 1024 * 6>().pointer();
     TileIndex T;
     float Creg[8][8] = {0.f};
     compute_block_ccr(
@@ -698,7 +696,7 @@ __global__ void sgemm_ccc_kernel(
     const uint32_t M, const uint32_t N, const uint32_t K,
     const uint32_t aS, const uint32_t bS, const uint32_t cS
 ) {
-    float *smem_buf = SharedMemory<float, 1024 * 6>().pointer();
+    float *smem_buf = buffer::SharedMemory<float, 1024 * 6>().pointer();
     TileIndex T;
     float Creg[8][8] = {0.f};
     compute_block_ccr(

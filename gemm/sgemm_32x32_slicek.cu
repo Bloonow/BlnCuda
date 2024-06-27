@@ -6,8 +6,6 @@
 
 namespace sgemm_32x32_4x8_SliceK {
 
-using buffer::SharedMemory;
-
 /* [WHEN] 48 < K <= 256 */
 struct TileIndexSliceK {
     uint32_t brid, bcid, tid, wid, lid;
@@ -517,7 +515,7 @@ __global__ void sgemm_rrr_kernel(
     const float *A, const float *B, float *C, const float alpha,
     const uint32_t M, const uint32_t N, const uint32_t K, const uint32_t aS, const uint32_t bS, const uint32_t cS
 ) {
-    float *smem_buf = SharedMemory<float, 1024 * 4>().pointer();
+    float *smem_buf = buffer::SharedMemory<float, 1024 * 4>().pointer();
     TileIndexSliceK T(M, N, K, aS, bS, cS);
     float Creg[2][4][4] = {};
     compute_block_rrr(Creg, smem_buf, A, B, alpha, T);
@@ -528,7 +526,7 @@ __global__ void sgemm_rrc_kernel(
     const float *A, const float *B, float *C, const float alpha,
     const uint32_t M, const uint32_t N, const uint32_t K, const uint32_t aS, const uint32_t bS, const uint32_t cS
 ) {
-    float *smem_buf = SharedMemory<float, 1024 * 4>().pointer();
+    float *smem_buf = buffer::SharedMemory<float, 1024 * 4>().pointer();
     TileIndexSliceK T(M, N, K, aS, bS, cS);
     float Creg[2][4][4] = {};
     compute_block_rrr(Creg, smem_buf, A, B, alpha, T);
@@ -539,7 +537,7 @@ __global__ void sgemm_rcr_kernel(
     const float *A, const float *B, float *C, const float alpha,
     const uint32_t M, const uint32_t N, const uint32_t K, const uint32_t aS, const uint32_t bS, const uint32_t cS
 ) {
-    float *smem_buf = SharedMemory<float, 1024 * 4>().pointer();
+    float *smem_buf = buffer::SharedMemory<float, 1024 * 4>().pointer();
     TileIndexSliceK T(M, N, K, aS, bS, cS);
     float Creg[2][4][4] = {};
     compute_block_rcr(Creg, smem_buf, A, B, alpha, T);
@@ -550,7 +548,7 @@ __global__ void sgemm_rcc_kernel(
     const float *A, const float *B, float *C, const float alpha,
     const uint32_t M, const uint32_t N, const uint32_t K, const uint32_t aS, const uint32_t bS, const uint32_t cS
 ) {
-    float *smem_buf = SharedMemory<float, 1024 * 4>().pointer();
+    float *smem_buf = buffer::SharedMemory<float, 1024 * 4>().pointer();
     TileIndexSliceK T(M, N, K, aS, bS, cS);
     float Creg[2][4][4] = {};
     compute_block_rcr(Creg, smem_buf, A, B, alpha, T);
@@ -561,7 +559,7 @@ __global__ void sgemm_crr_kernel(
     const float *A, const float *B, float *C, const float alpha,
     const uint32_t M, const uint32_t N, const uint32_t K, const uint32_t aS, const uint32_t bS, const uint32_t cS
 ) {
-    float *smem_buf = SharedMemory<float, 1024 * 4>().pointer();
+    float *smem_buf = buffer::SharedMemory<float, 1024 * 4>().pointer();
     TileIndexSliceK T(M, N, K, aS, bS, cS);
     float Creg[2][4][4] = {};
     compute_block_crr(Creg, smem_buf, A, B, alpha, T);
@@ -572,7 +570,7 @@ __global__ void sgemm_crc_kernel(
     const float *A, const float *B, float *C, const float alpha,
     const uint32_t M, const uint32_t N, const uint32_t K, const uint32_t aS, const uint32_t bS, const uint32_t cS
 ) {
-    float *smem_buf = SharedMemory<float, 1024 * 4>().pointer();
+    float *smem_buf = buffer::SharedMemory<float, 1024 * 4>().pointer();
     TileIndexSliceK T(M, N, K, aS, bS, cS);
     float Creg[2][4][4] = {};
     compute_block_crr(Creg, smem_buf, A, B, alpha, T);
@@ -583,7 +581,7 @@ __global__ void sgemm_ccr_kernel(
     const float *A, const float *B, float *C, const float alpha,
     const uint32_t M, const uint32_t N, const uint32_t K, const uint32_t aS, const uint32_t bS, const uint32_t cS
 ) {
-    float *smem_buf = SharedMemory<float, 1024 * 4>().pointer();
+    float *smem_buf = buffer::SharedMemory<float, 1024 * 4>().pointer();
     TileIndexSliceK T(M, N, K, aS, bS, cS);
     float Creg[2][4][4] = {};
     compute_block_ccr(Creg, smem_buf, A, B, alpha, T);
@@ -594,7 +592,7 @@ __global__ void sgemm_ccc_kernel(
     const float *A, const float *B, float *C, const float alpha,
     const uint32_t M, const uint32_t N, const uint32_t K, const uint32_t aS, const uint32_t bS, const uint32_t cS
 ) {
-    float *smem_buf = SharedMemory<float, 1024 * 4>().pointer();
+    float *smem_buf = buffer::SharedMemory<float, 1024 * 4>().pointer();
     TileIndexSliceK T(M, N, K, aS, bS, cS);
     float Creg[2][4][4] = {};
     compute_block_ccr(Creg, smem_buf, A, B, alpha, T);
