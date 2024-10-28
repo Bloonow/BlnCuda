@@ -4,8 +4,8 @@
 #include "../learn/helper.cu"
 
 int main(int argc, char *argv[]) {
-    int32_t Batch = 16;
-    int64_t M = 98, N = 113, K = 5099;
+    int32_t Batch = 1;
+    int64_t M = 98, N = 113, K = 12099;
     uint64_t workspace_bytes = 16 * 1024 * 1024;
     float alpha = 1.0, beta = 0;
     float *h_A = alloc_host_memory<float>(Batch * M * K);
@@ -58,16 +58,21 @@ int main(int argc, char *argv[]) {
         requestAlgoCount, heuristicResult, &returnAlgoCount
     );
     cublasLtMatmulAlgo_t algo = heuristicResult[0].algo;
-    stat = cublasLtMatmulAlgoConfigSetAttribute(&algo, CUBLASLT_ALGO_CONFIG_SPLITK_NUM, &splitK, sizeof(splitK));
+    // stat = cublasLtMatmulAlgoConfigSetAttribute(&algo, CUBLASLT_ALGO_CONFIG_SPLITK_NUM, &splitK, sizeof(splitK));
 
     // 矩阵乘法
     stat = cublasLtMatmul(
         lt, matmul_desc, &alpha, d_A, A_layout, d_B, B_layout, &beta, d_C, C_layout, d_C, C_layout,
         &algo, workspace, workspace_bytes, nullptr
     );
+    if (stat == CUBLAS_STATUS_SUCCESS) {
+        printf("[Success]\n");
+        printf("Compute Over!\n");
+    } else {
+        printf("[Error][%d]\n", stat);
+    }
     cudaMemcpy(ret_C, d_C, sizeof(float) * Batch * M * N, cudaMemcpyDeviceToHost);
 
-    printf("Compute Over!\n");
     // 释放资源
     cublasLtMatmulPreferenceDestroy(preference);
     cublasLtMatmulDescDestroy(matmul_desc);

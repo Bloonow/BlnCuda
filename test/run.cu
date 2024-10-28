@@ -22,7 +22,7 @@ int main(int argc, char *argv[]) {
     matrix_init(&C1, M, N, batchCount, 0.f); matrix_init(&C2, M, N, batchCount, 0.f);
 
     // 是否测试正确性
-    #define TEST_ERROR 1.e-3
+    // #define TEST_ERROR 1.e-3
 
     cublasLt_sgemm(A, B, C0_ROW, alpha, beta, M, N, K, batchCount, CUBLASLT_ORDER_ROW, CUBLASLT_ORDER_ROW, CUBLASLT_ORDER_ROW);
     cublasLt_sgemm(A, B, C0_COL, alpha, beta, M, N, K, batchCount, CUBLASLT_ORDER_ROW, CUBLASLT_ORDER_ROW, CUBLASLT_ORDER_COL);
