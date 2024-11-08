@@ -4,8 +4,8 @@
 #include "../learn/helper.cu"
 
 int main(int argc, char *argv[]) {
-    int32_t Batch = 1;
-    int64_t M = 98, N = 113, K = 12099;
+    int32_t Batch = 4;
+    int64_t M = 64, N = 64, K = 16384;
     uint64_t workspace_bytes = 16 * 1024 * 1024;
     float alpha = 1.0, beta = 0;
     float *h_A = alloc_host_memory<float>(Batch * M * K);
@@ -31,22 +31,21 @@ int main(int argc, char *argv[]) {
     stat = cublasLtMatrixLayoutSetAttribute(B_layout, CUBLASLT_MATRIX_LAYOUT_ORDER, &order, sizeof(order));
     stat = cublasLtMatrixLayoutSetAttribute(C_layout, CUBLASLT_MATRIX_LAYOUT_ORDER, &order, sizeof(order));
     // 设置批量数目及跨步间距
-    stat = cublasLtMatrixLayoutSetAttribute(A_layout, CUBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &Batch, sizeof(Batch));
-    stat = cublasLtMatrixLayoutSetAttribute(B_layout, CUBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &Batch, sizeof(Batch));
-    stat = cublasLtMatrixLayoutSetAttribute(C_layout, CUBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &Batch, sizeof(Batch));
     int64_t A_stride = M * K, B_stride = K * N, C_stride = M * N;
     stat = cublasLtMatrixLayoutSetAttribute(A_layout, CUBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET, &A_stride, sizeof(A_stride));
     stat = cublasLtMatrixLayoutSetAttribute(B_layout, CUBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET, &B_stride, sizeof(B_stride));
     stat = cublasLtMatrixLayoutSetAttribute(C_layout, CUBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET, &C_stride, sizeof(C_stride));
+    stat = cublasLtMatrixLayoutSetAttribute(A_layout, CUBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &Batch, sizeof(Batch));
+    stat = cublasLtMatrixLayoutSetAttribute(B_layout, CUBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &Batch, sizeof(Batch));
+    stat = cublasLtMatrixLayoutSetAttribute(C_layout, CUBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &Batch, sizeof(Batch));
 
     // 设置矩阵乘法计算配置
     cublasLtMatmulDesc_t matmul_desc;
     stat = cublasLtMatmulDescCreate(&matmul_desc, CUBLAS_COMPUTE_32F, CUDA_R_32F);
 
-    // 搜索最佳的实现算法
+    // has used cublasLtMatrixLayoutSetAttribute() to set BatchCount and Strided
     const int requestAlgoCount = 4;
     int returnAlgoCount = 0;
-    int32_t splitK = 16;
     cublasLtMatmulPreference_t preference;
     stat = cublasLtMatmulPreferenceCreate(&preference);
     stat = cublasLtMatmulPreferenceSetAttribute(
@@ -58,19 +57,16 @@ int main(int argc, char *argv[]) {
         requestAlgoCount, heuristicResult, &returnAlgoCount
     );
     cublasLtMatmulAlgo_t algo = heuristicResult[0].algo;
-    // stat = cublasLtMatmulAlgoConfigSetAttribute(&algo, CUBLASLT_ALGO_CONFIG_SPLITK_NUM, &splitK, sizeof(splitK));
-
-    // 矩阵乘法
+    int32_t splitK = 16;  // set the split number for using SplitK algorithm
+    stat = cublasLtMatmulAlgoConfigSetAttribute(&algo, CUBLASLT_ALGO_CONFIG_SPLITK_NUM, &splitK, sizeof(splitK));
     stat = cublasLtMatmul(
         lt, matmul_desc, &alpha, d_A, A_layout, d_B, B_layout, &beta, d_C, C_layout, d_C, C_layout,
         &algo, workspace, workspace_bytes, nullptr
     );
-    if (stat == CUBLAS_STATUS_SUCCESS) {
-        printf("[Success]\n");
-        printf("Compute Over!\n");
-    } else {
-        printf("[Error][%d]\n", stat);
+    if (stat != CUBLAS_STATUS_SUCCESS) {
+        printf("[Error][%d], %s\n", stat, cublasLtGetStatusString(stat));
     }
+    
     cudaMemcpy(ret_C, d_C, sizeof(float) * Batch * M * N, cudaMemcpyDeviceToHost);
 
     // 释放资源
