@@ -58,8 +58,7 @@ int main() {
     const int thread_num = 4;  // 仅使用一个Warp中的4个线程即可
     const int round = 10;      // 执行多少次ldg指令
 
-    void** src;
-    void** dst;
+    void **src, **dst;
     uint32_t* clk;
     cudaMalloc(&src, thread_num * sizeof(void*));
     cudaMalloc(&dst, sizeof(void*));

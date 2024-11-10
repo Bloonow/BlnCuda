@@ -99,19 +99,19 @@ int main(int argc, char* argv[]) {
     double bw_measured = double(smem_bytes) / duration;
     uint32_t bw_theoretical = ((uint32_t)bw_measured + 31) / 32 * 32;
 
-    printf("shared memory accessed: %u byte\n", smem_bytes);
-    printf("duration: %u cycle\n", duration);
-    printf("shared memory bandwidth per SM (measured): %.2f byte/cycle\n", bw_measured);
-    printf("shared memory bandwidth per SM (theoretical): %u byte/cycle\n", bw_theoretical);
+    printf("Shared memory accessed: %u byte\n", smem_bytes);
+    printf("Duration: %u cycle\n", duration);
+    printf("Shared memory bandwidth per SM (measured): %.2f byte/cycle\n", bw_measured);
+    printf("Shared memory bandwidth per SM (theoretical): %u byte/cycle\n", bw_theoretical);
 
     cudaDeviceProp prop;
     cudaGetDeviceProperties(&prop, 0);
     uint32_t clk = prop.clockRate / 1000;  // KHz / 1000 = MHz
     uint32_t sm = prop.multiProcessorCount;
     double chip_bandwidth = double(sm) * bw_theoretical * clk / 1024;  // GiB/s
-    printf("standard clock frequency: %u MHz\n", clk);
+    printf("Standard clock frequency: %u MHz\n", clk);
     printf("SM: %u\n", sm);
-    printf("whole chip shared memory bandwidth (theoretical): %.2f GiB/s\n", chip_bandwidth);
+    printf("Whole chip shared memory bandwidth (theoretical): %.2f GiB/s\n", chip_bandwidth);
 
     cudaFree(dst);
     cudaFree(clk_start);

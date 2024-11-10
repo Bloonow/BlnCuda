@@ -62,7 +62,8 @@ int main(int argc, char* argv[]) {
     const int data_bytes = stride * (round + 1);
     static_assert(stride >= 32 * sizeof(uint32_t) && stride % sizeof(uint32_t) == 0, "'stride' is invalid");
 
-    uint32_t *src, *dst, *clk;
+    uint32_t *src, *dst;
+    uint32_t *clk;
     cudaMalloc(&src, data_bytes);
     cudaMalloc(&dst, sizeof(uint32_t));
     cudaMalloc(&clk, 32 * sizeof(uint32_t));

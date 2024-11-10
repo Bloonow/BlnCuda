@@ -1,166 +1,152 @@
 #include <cstdio>
 #include <cstdint>
 
-const int MEMORY_OFFSET = (1u << 20) * 16;
-const int BENCH_ITER = 100;
-
-const int BLOCK = 128;
-const int LDG_UNROLL = 1;
-
-__device__ __forceinline__
-uint4 ldg_cs(const void *ptr) {
+__device__ __forceinline__ uint4 ldg_cs(const void* ptr) {
     uint4 ret;
+    // ld.global指令从设备全局内存中进行读取
+    // cs适用于流式（streaming）数据，指示程序以驱逐优先（evict-first）策略分配L1或L2缓存行，这种流数据可能只被访问一两次
+    // cs策略可以避免缓存污染（cache pollution），即避免缓存中存储大量不必要的数据
+    // b32表示将数据的类型解析为32位的Bits(untyped)
+    // memory表示该内联汇编会影响内存状态，编译器应该避免优化掉相关内存操作，这在循环或并行执行时尤为重要
     asm volatile (
         "ld.global.cs.v4.b32 {%0, %1, %2, %3}, [%4];"
         : "=r"(ret.x), "=r"(ret.y), "=r"(ret.z), "=r"(ret.w)
         : "l"(ptr)
+        : "memory"
     );
-
     return ret;
 }
 
-__device__ __forceinline__
-void stg_cs(const uint4 &reg, void *ptr) {
+__device__ __forceinline__ void stg_cs(const uint4& reg, void* ptr) {
     asm volatile (
         "st.global.cs.v4.b32 [%4], {%0, %1, %2, %3};"
-        : : "r"(reg.x), "r"(reg.y), "r"(reg.z), "r"(reg.w), "l"(ptr)
+        :
+        : "r"(reg.x), "r"(reg.y), "r"(reg.z), "r"(reg.w), "l"(ptr)
+        : "memory"
     );
 }
 
-template <int BLOCK, int VEC_UNROLL>
-__global__ void read_kernel(const void *x, void *y) {
-    uint32_t idx = blockIdx.x * BLOCK * VEC_UNROLL + threadIdx.x;
-
-    const uint4 *ldg_ptr = (const uint4 *)x + idx;
-    uint4 reg[VEC_UNROLL];
+template <int block_size, int thread_tile>
+__global__ void read_kernel(const void* src, void* dst) {
+    const int block_tile = block_size * thread_tile;
+    const int offset = block_tile * blockIdx.x + threadIdx.x;
+    const uint4* ldg_ptr = reinterpret_cast<const uint4*>(src) + offset;
+    uint4 reg[thread_tile];
 
     #pragma unroll
-    for (int i = 0; i < VEC_UNROLL; ++i) {
-        reg[i] = ldg_cs(ldg_ptr + i * BLOCK);
+    for (int i = 0; i < thread_tile; i++) {
+        // 读设备全局内存，并避免使用L2缓存
+        reg[i] = ldg_cs(ldg_ptr + block_size * i);
     }
 
-    // dummy STG
     #pragma unroll
-    for (int i = 0; i < VEC_UNROLL; ++i) {
+    for (int i = 0; i < thread_tile; i++) {
         if (reg[i].x != 0) {
-            stg_cs(reg[i], (uint4 *)y + i);
+            stg_cs(reg[i], (uint4*)dst + i);  // 防止编译器优化
         }
     }
 }
 
-template <int BLOCK, int VEC_UNROLL>
-__global__ void write_kernel(void *y) {
-    uint32_t idx = blockIdx.x * BLOCK * VEC_UNROLL + threadIdx.x;
-
-    uint4 *stg_ptr = (uint4 *)y + idx;
+template <int block_size, int thread_tile>
+__global__ void write_kernel(void* dst) {
+    const int block_tile = block_size * thread_tile;
+    const int offset = block_tile * blockIdx.x + threadIdx.x;
+    uint4* stg_ptr = reinterpret_cast<uint4*>(dst) + offset;
 
     #pragma unroll
-    for (int i = 0; i < VEC_UNROLL; ++i) {
+    for (int i = 0; i < thread_tile; i++) {
         uint4 reg = make_uint4(0, 0, 0, 0);
-        stg_cs(reg, stg_ptr + i * BLOCK);
+        stg_cs(reg, stg_ptr + block_size * i);
     }
 }
 
-template <int BLOCK, int VEC_UNROLL>
-__global__ void copy_kernel(const void *x, void *y) {
-    uint32_t idx = blockIdx.x * BLOCK * VEC_UNROLL + threadIdx.x;
-
-    const uint4 *ldg_ptr = (const uint4 *)x + idx;
-    uint4 *stg_ptr = (uint4 *)y + idx;
-    uint4 reg[VEC_UNROLL];
+template <int block_size, int thread_tile>
+__global__ void copy_kernel(const void* src, void* dst) {
+    const int block_tile = block_size * thread_tile;
+    const int offset = block_tile * blockIdx.x + threadIdx.x;
+    const uint4* ldg_ptr = reinterpret_cast<const uint4*>(src) + offset;
+    uint4* stg_ptr = reinterpret_cast<uint4*>(dst) + offset;
+    uint4 reg[thread_tile];
 
     #pragma unroll
-    for (int i = 0; i < VEC_UNROLL; ++i) {
-        reg[i] = ldg_cs(ldg_ptr + i * BLOCK);
+    for (int i = 0; i < thread_tile; i++) {
+        reg[i] = ldg_cs(ldg_ptr + block_size * i);
     }
-
     #pragma unroll
-    for (int i = 0; i < VEC_UNROLL; ++i) {
-        stg_cs(reg[i], stg_ptr + i * BLOCK);
+    for (int i = 0; i < thread_tile; i++) {
+        stg_cs(reg[i], stg_ptr + block_size * i);
     }
 }
 
-void benchmark(size_t size_in_byte) {
-    printf("%luMB (r+w)\n", size_in_byte / (1 << 20));
+template <int block_size, int thread_tile, int memory_round, int benchmark_amount>
+void benchmark(const size_t data_bytes) {
+    printf("%lu MiB (r+w)\n", data_bytes / (1 << 20));
+    size_t data_num = data_bytes / sizeof(uint4);
+    size_t grid_size = data_num / (block_size * thread_tile);
+    static_assert(memory_round % sizeof(uint4) == 0, "memory_round is invalid");
 
-    double size_gb = (double)size_in_byte / (1 << 30);
+    char* workspace;
+    cudaMalloc(&workspace, data_bytes + memory_round * benchmark_amount);
+    cudaMemset(workspace, 0, data_bytes + memory_round * benchmark_amount);
 
-    size_t n = size_in_byte / sizeof(uint4);
-    size_t grid = n / (BLOCK * LDG_UNROLL);
-
-    static_assert(MEMORY_OFFSET % sizeof(uint4) == 0,
-                  "invalid MEMORY_OFFSET");
-
-    char *ws;
-    cudaMalloc(&ws, size_in_byte + MEMORY_OFFSET * BENCH_ITER);
-
-    // set all zero for read-only kernel
-    cudaMemset(ws, 0, size_in_byte + MEMORY_OFFSET * BENCH_ITER);
-
+    float time_ms = 0;
     cudaEvent_t start, stop;
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
-    float time_ms = 0.f;
 
-    // warmup
-    read_kernel<BLOCK, LDG_UNROLL><<<grid, BLOCK>>>(ws, nullptr);
-    write_kernel<BLOCK, LDG_UNROLL><<<grid, BLOCK>>>(ws);
-    copy_kernel<BLOCK, LDG_UNROLL><<<grid / 2, BLOCK>>>(ws, ws + size_in_byte / 2);
+    // 预热
+    read_kernel<block_size, thread_tile><<<grid_size, block_size>>>(workspace, workspace);
+    write_kernel<block_size, thread_tile><<<grid_size, block_size>>>(workspace);
+    copy_kernel<block_size, thread_tile><<<grid_size / 2, block_size>>>(workspace, workspace + data_bytes / 2);
 
-    // read
+    // 读全局内存
     cudaEventRecord(start);
-    for (int i = BENCH_ITER - 1; i >= 0; --i) {
-        read_kernel<BLOCK, LDG_UNROLL><<<grid, BLOCK>>>(ws + i * MEMORY_OFFSET, nullptr);
-    }
-    cudaEventRecord(stop);
-
-    cudaEventSynchronize(stop);
-    cudaEventElapsedTime(&time_ms, start, stop);
-    printf("read %fGB/s\n", size_gb * BENCH_ITER / ((double)time_ms / 1000));
-
-    // write
-    cudaEventRecord(start);
-    for (int i = BENCH_ITER - 1; i >= 0; --i) {
-        write_kernel<BLOCK, LDG_UNROLL><<<grid, BLOCK>>>(ws + i * MEMORY_OFFSET);
-    }
-    cudaEventRecord(stop);
-
-    cudaEventSynchronize(stop);
-    cudaEventElapsedTime(&time_ms, start, stop);
-    printf("write %fGB/s\n", size_gb * BENCH_ITER / ((double)time_ms / 1000));
-
-
-    // copy
-    cudaEventRecord(start);
-    for (int i = BENCH_ITER - 1; i >= 0; --i) {
-        copy_kernel<BLOCK, LDG_UNROLL><<<grid / 2, BLOCK>>>(
-            ws + i * MEMORY_OFFSET,
-            ws + i * MEMORY_OFFSET + size_in_byte / 2);
+    for (int i = benchmark_amount - 1; i >= 0; i--) {
+        read_kernel<block_size, thread_tile><<<grid_size, block_size>>>(workspace + i * memory_round, workspace);
     }
     cudaEventRecord(stop);
     cudaEventSynchronize(stop);
-
     cudaEventElapsedTime(&time_ms, start, stop);
-    printf("copy %fGB/s\n", size_gb * BENCH_ITER / ((double)time_ms / 1000));
+    printf("Read : %.2f GiB/s\n", ((double)data_bytes * benchmark_amount / (1 << 30)) / ((double)time_ms / 1000));
 
-    printf("---------------------------\n");
+    // 写全局内存
+    cudaEventRecord(start);
+    for (int i = benchmark_amount - 1; i >= 0; i--) {
+        write_kernel<block_size, thread_tile><<<grid_size, block_size>>>(workspace + i * memory_round);
+    }
+    cudaEventRecord(stop);
+    cudaEventSynchronize(stop);
+    cudaEventElapsedTime(&time_ms, start, stop);
+    printf("Write: %.2f GiB/s\n", ((double)data_bytes * benchmark_amount / (1 << 30)) / ((double)time_ms / 1000));
+
+    // 复制全局内存
+    cudaEventRecord(start);
+    for (int i = benchmark_amount - 1; i >= 0; i--) {
+        copy_kernel<block_size, thread_tile><<<grid_size / 2, block_size>>>(
+            workspace + i * memory_round, workspace + i * memory_round + data_bytes / 2
+        );
+    }
+    cudaEventRecord(stop);
+    cudaEventSynchronize(stop);
+    cudaEventElapsedTime(&time_ms, start, stop);
+    printf("Copy : %.2f GiB/s\n", ((double)data_bytes * benchmark_amount / (1 << 30)) / ((double)time_ms / 1000));
+
+    printf("------------------------\n");
 
     cudaEventDestroy(start);
     cudaEventDestroy(stop);
-
-    cudaFree(ws);
+    cudaFree(workspace);
 }
 
-int main() {
-    size_t size = (1lu << 20) * 4;
+int main(int argc, char* argv[]) {
+    const int block_size = 128;
+    const int thread_tile = 1;
+    const int memory_round = (1u << 20) * 16;  // 16MiB
+    const int benchmark_amount = 100;
 
-    // 4MB~1GB
-    while (size <= (1lu << 30)) {
-        benchmark(size);
-        size *= 2;
+    // 4MiB ~ 1GiB
+    for (size_t bytes = (1 << 20) * 4; bytes <= (1 << 30); bytes *= 4) {
+        benchmark<block_size, thread_tile, memory_round, benchmark_amount>(bytes);
     }
-
     return 0;
 }
-
-
