@@ -79,7 +79,7 @@ int main() {
 
     uint32_t h_clk[thread_num];
     cudaMemcpy(h_clk, clk, thread_num * sizeof(uint32_t), cudaMemcpyDeviceToHost);
-    printf("L1 cache latency: %u cycles\n", h_clk[0] / round);
+    printf("L1 cache latency: %u cycle\n", h_clk[0] / round);
 
     cudaFree(src);
     cudaFree(dst);

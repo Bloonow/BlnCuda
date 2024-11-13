@@ -80,7 +80,7 @@ int main(int argc, char* argv[]) {
 
     uint32_t h_clk[16];
     cudaMemcpy(h_clk, clk, 16 * sizeof(uint32_t), cudaMemcpyDeviceToHost);
-    printf("Shared memory latency %u cycles\n", h_clk[0] / round);
+    printf("Shared memory latency: %u cycle\n", h_clk[0] / round);
 
     cudaFree(src);
     cudaFree(dst);

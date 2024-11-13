@@ -101,8 +101,8 @@ int main(int argc, char* argv[]) {
 
     printf("Shared memory accessed: %u byte\n", smem_bytes);
     printf("Duration: %u cycle\n", duration);
-    printf("Shared memory bandwidth per SM (measured): %.2f byte/cycle\n", bw_measured);
-    printf("Shared memory bandwidth per SM (theoretical): %u byte/cycle\n", bw_theoretical);
+    printf("Shared memory bandwidth per SM (measured): %.2f Byte/cycle\n", bw_measured);
+    printf("Shared memory bandwidth per SM (theoretical): %u Byte/cycle\n", bw_theoretical);
 
     cudaDeviceProp prop;
     cudaGetDeviceProperties(&prop, 0);

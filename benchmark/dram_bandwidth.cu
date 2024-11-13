@@ -144,8 +144,8 @@ int main(int argc, char* argv[]) {
     const int memory_round = (1u << 20) * 16;  // 16MiB
     const int benchmark_amount = 100;
 
-    // 4MiB ~ 1GiB
-    for (size_t bytes = (1 << 20) * 4; bytes <= (1 << 30); bytes *= 4) {
+    // 4MiB ~ 2GiB
+    for (size_t bytes = (1ull << 20) * 4; bytes <= (1ull << 30) * 2; bytes *= 8) {
         benchmark<block_size, thread_tile, memory_round, benchmark_amount>(bytes);
     }
     return 0;
