@@ -26,10 +26,10 @@ struct TileIndex {
 __device__ __forceinline__
 void store_result_smem_rr(
     float Creg[4][4], float *smem_buf, float *C,
-    const uint32_t &M, const uint32_t &N, const uint32_t &cS,
-    const uint32_t &brid, const uint32_t &bcid, const uint32_t &tid,
-    const uint32_t &wrows, const uint32_t &wcols, const uint32_t &wrid, const uint32_t &wcid,
-    const uint32_t &lrid, const uint32_t &lcid
+    const uint32_t M, const uint32_t N, const uint32_t cS,
+    const uint32_t brid, const uint32_t bcid, const uint32_t tid,
+    const uint32_t wrows, const uint32_t wcols, const uint32_t wrid, const uint32_t wcid,
+    const uint32_t lrid, const uint32_t lcid
 ) {
     // 使用 32x32 共享内存搬运 32x32 数据（需 1 次）
     // [NEXT] C_smem_st + r * 32 * sizeof(float)
@@ -56,10 +56,10 @@ void store_result_smem_rr(
 __device__ __forceinline__
 void store_result_smem_rc(
     float Creg[4][4], float *smem_buf, float *C,
-    const uint32_t &M, const uint32_t &N, const uint32_t &cS,
-    const uint32_t &brid, const uint32_t &bcid, const uint32_t &tid,
-    const uint32_t &wrows, const uint32_t &wcols, const uint32_t &wrid, const uint32_t &wcid,
-    const uint32_t &lrid, const uint32_t &lcid
+    const uint32_t M, const uint32_t N, const uint32_t cS,
+    const uint32_t brid, const uint32_t bcid, const uint32_t tid,
+    const uint32_t wrows, const uint32_t wcols, const uint32_t wrid, const uint32_t wcid,
+    const uint32_t lrid, const uint32_t lcid
 ) {
     // 使用 32x32 共享内存搬运 32x32 数据（需 1 次）
     // [NEXT] C_smem_st + c * 32 * sizeof(float)
@@ -85,11 +85,11 @@ void store_result_smem_rc(
 
 __device__ __forceinline__
 void compute_block_rrr(
-    float Creg[4][4], float *smem_buf, const float *A, const float *B, const float &alpha,
-    const uint32_t &M, const uint32_t &N, const uint32_t &K, const uint32_t &aS, const uint32_t &bS,
-    const uint32_t &brid, const uint32_t &bcid, const uint32_t &tid, const uint32_t &wid, const uint32_t &lid,
-    const uint32_t &wrows, const uint32_t &wcols, const uint32_t &wrid, const uint32_t &wcid,
-    const uint32_t &lrid, const uint32_t &lcid
+    float Creg[4][4], float *smem_buf, const float *A, const float *B, const float alpha,
+    const uint32_t M, const uint32_t N, const uint32_t K, const uint32_t aS, const uint32_t bS,
+    const uint32_t brid, const uint32_t bcid, const uint32_t tid, const uint32_t wid, const uint32_t lid,
+    const uint32_t wrows, const uint32_t wcols, const uint32_t wrid, const uint32_t wcid,
+    const uint32_t lrid, const uint32_t lcid
 ) {
     float *A_smem = reinterpret_cast<float*>(smem_buf);
     float *B_smem = reinterpret_cast<float*>(smem_buf + (256 + 32) * 2);
@@ -200,11 +200,11 @@ void compute_block_rrr(
 
 __device__ __forceinline__
 void compute_block_rcr(
-    float Creg[4][4], float *smem_buf, const float *A, const float *B, const float &alpha,
-    const uint32_t &M, const uint32_t &N, const uint32_t &K, const uint32_t &aS, const uint32_t &bS,
-    const uint32_t &brid, const uint32_t &bcid, const uint32_t &tid, const uint32_t &wid, const uint32_t &lid,
-    const uint32_t &wrows, const uint32_t &wcols, const uint32_t &wrid, const uint32_t &wcid,
-    const uint32_t &lrid, const uint32_t &lcid
+    float Creg[4][4], float *smem_buf, const float *A, const float *B, const float alpha,
+    const uint32_t M, const uint32_t N, const uint32_t K, const uint32_t aS, const uint32_t bS,
+    const uint32_t brid, const uint32_t bcid, const uint32_t tid, const uint32_t wid, const uint32_t lid,
+    const uint32_t wrows, const uint32_t wcols, const uint32_t wrid, const uint32_t wcid,
+    const uint32_t lrid, const uint32_t lcid
 ) {
     float *A_smem = reinterpret_cast<float*>(smem_buf);
     float *B_smem = reinterpret_cast<float*>(smem_buf + (256 + 32) * 2);
@@ -309,11 +309,11 @@ void compute_block_rcr(
 
 __device__ __forceinline__
 void compute_block_crr(
-    float Creg[4][4], float *smem_buf, const float *A, const float *B, const float &alpha,
-    const uint32_t &M, const uint32_t &N, const uint32_t &K, const uint32_t &aS, const uint32_t &bS,
-    const uint32_t &brid, const uint32_t &bcid, const uint32_t &tid, const uint32_t &wid, const uint32_t &lid,
-    const uint32_t &wrows, const uint32_t &wcols, const uint32_t &wrid, const uint32_t &wcid,
-    const uint32_t &lrid, const uint32_t &lcid
+    float Creg[4][4], float *smem_buf, const float *A, const float *B, const float alpha,
+    const uint32_t M, const uint32_t N, const uint32_t K, const uint32_t aS, const uint32_t bS,
+    const uint32_t brid, const uint32_t bcid, const uint32_t tid, const uint32_t wid, const uint32_t lid,
+    const uint32_t wrows, const uint32_t wcols, const uint32_t wrid, const uint32_t wcid,
+    const uint32_t lrid, const uint32_t lcid
 ) {
     float *A_smem = reinterpret_cast<float*>(smem_buf);
     float *B_smem = reinterpret_cast<float*>(smem_buf + 256 * 2);
@@ -424,11 +424,11 @@ void compute_block_crr(
 
 __device__ __forceinline__
 void compute_block_ccr(
-    float Creg[4][4], float *smem_buf, const float *A, const float *B, const float &alpha,
-    const uint32_t &M, const uint32_t &N, const uint32_t &K, const uint32_t &aS, const uint32_t &bS,
-    const uint32_t &brid, const uint32_t &bcid, const uint32_t &tid, const uint32_t &wid, const uint32_t &lid,
-    const uint32_t &wrows, const uint32_t &wcols, const uint32_t &wrid, const uint32_t &wcid,
-    const uint32_t &lrid, const uint32_t &lcid
+    float Creg[4][4], float *smem_buf, const float *A, const float *B, const float alpha,
+    const uint32_t M, const uint32_t N, const uint32_t K, const uint32_t aS, const uint32_t bS,
+    const uint32_t brid, const uint32_t bcid, const uint32_t tid, const uint32_t wid, const uint32_t lid,
+    const uint32_t wrows, const uint32_t wcols, const uint32_t wrid, const uint32_t wcid,
+    const uint32_t lrid, const uint32_t lcid
 ) {
     float *A_smem = reinterpret_cast<float*>(smem_buf);
     float *B_smem = reinterpret_cast<float*>(smem_buf + 256 * 2);

@@ -66,10 +66,10 @@ void reduce_over_warp(
 
 __device__ __forceinline__
 void store_result_smem_rr(
-    float Creg[2][4][4], float *smem_buf, float *SplitC, const uint32_t &split_num, const uint32_t &split_idx,
-    const uint32_t &M, const uint32_t &N, const uint32_t &cS,
-    const uint32_t &brid, const uint32_t &bcid, const uint32_t &tid, const uint32_t &wid, const uint32_t &lid,
-    const uint32_t &wcols, const uint32_t &lrid, const uint32_t &lcid
+    float Creg[2][4][4], float *smem_buf, float *SplitC, const uint32_t split_num, const uint32_t split_idx,
+    const uint32_t M, const uint32_t N, const uint32_t cS,
+    const uint32_t brid, const uint32_t bcid, const uint32_t tid, const uint32_t wid, const uint32_t lid,
+    const uint32_t wcols, const uint32_t lrid, const uint32_t lcid
 ) {
     // 存在 slice_num 份矩阵 C 子区域的部分结果，需先使用共享内存对其进行归约   
     float *Csmem = reinterpret_cast<float*>(smem_buf + 1024 * wid);
@@ -107,10 +107,10 @@ void store_result_smem_rr(
 
 __device__ __forceinline__
 void store_result_smem_rc(
-    float Creg[2][4][4], float *smem_buf, float *SplitC, const uint32_t &split_num, const uint32_t &split_idx,
-    const uint32_t &M, const uint32_t &N, const uint32_t &cS,
-    const uint32_t &brid, const uint32_t &bcid, const uint32_t &tid, const uint32_t &wid, const uint32_t &lid,
-    const uint32_t &wcols, const uint32_t &lrid, const uint32_t &lcid
+    float Creg[2][4][4], float *smem_buf, float *SplitC, const uint32_t split_num, const uint32_t split_idx,
+    const uint32_t M, const uint32_t N, const uint32_t cS,
+    const uint32_t brid, const uint32_t bcid, const uint32_t tid, const uint32_t wid, const uint32_t lid,
+    const uint32_t wcols, const uint32_t lrid, const uint32_t lcid
 ) {
     // 存在 slice_num 份矩阵 C 子区域的部分结果，需先使用共享内存对其进行归约   
     float *Csmem = reinterpret_cast<float*>(smem_buf + 1024 * wid);
@@ -149,8 +149,8 @@ void store_result_smem_rc(
 
 __device__ __forceinline__
 void compute_tile_crr(
-    float Creg[2][4][4], float *Asmem, float *Bsmem, const uint32_t &ldA, const uint32_t &ldB,
-    const uint32_t &wcols, const uint32_t &lrid, const uint32_t &lcid
+    float Creg[2][4][4], float *Asmem, float *Bsmem, const uint32_t ldA, const uint32_t ldB,
+    const uint32_t wcols, const uint32_t lrid, const uint32_t lcid
 ) {
     float4 Areg, Breg[2];
     // 每个线程计算 C 的子域，采用向量外积方式，在 K_block 维度上循环迭代
@@ -183,7 +183,7 @@ void compute_tile_crr(
 
 __device__ __forceinline__
 void compute_block_rrr(
-    float Creg[2][4][4], float *smem_buf, const float *A, const float *B, const float &alpha, const TileIndexSplitK &T
+    float Creg[2][4][4], float *smem_buf, const float *A, const float *B, const float alpha, const TileIndexSplitK &T
 ) {
     float *Asmem = reinterpret_cast<float*>(smem_buf + 1024 * T.wid);
     float *Bsmem = reinterpret_cast<float*>(smem_buf + 1024 * T.wid + (128 + 32) * 2);
@@ -270,7 +270,7 @@ void compute_block_rrr(
 
 __device__ __forceinline__
 void compute_block_rcr(
-    float Creg[2][4][4], float *smem_buf, const float *A, const float *B, const float &alpha, const TileIndexSplitK &T
+    float Creg[2][4][4], float *smem_buf, const float *A, const float *B, const float alpha, const TileIndexSplitK &T
 ) {
     float *Asmem = reinterpret_cast<float*>(smem_buf + 1024 * T.wid);
     float *Bsmem = reinterpret_cast<float*>(smem_buf + 1024 * T.wid + (128 + 32) * 2);
@@ -351,7 +351,7 @@ void compute_block_rcr(
 
 __device__ __forceinline__
 void compute_block_crr(
-    float Creg[2][4][4], float *smem_buf, const float *A, const float *B, const float &alpha, const TileIndexSplitK &T
+    float Creg[2][4][4], float *smem_buf, const float *A, const float *B, const float alpha, const TileIndexSplitK &T
 ) {
     float *Asmem = reinterpret_cast<float*>(smem_buf + 1024 * T.wid);
     float *Bsmem = reinterpret_cast<float*>(smem_buf + 1024 * T.wid + 128 * 2);
@@ -443,7 +443,7 @@ void compute_block_crr(
 
 __device__ __forceinline__
 void compute_block_ccr(
-    float Creg[2][4][4], float *smem_buf, const float *A, const float *B, const float &alpha, const TileIndexSplitK &T
+    float Creg[2][4][4], float *smem_buf, const float *A, const float *B, const float alpha, const TileIndexSplitK &T
 ) {
     float *Asmem = reinterpret_cast<float*>(smem_buf + 1024 * T.wid);
     float *Bsmem = reinterpret_cast<float*>(smem_buf + 1024 * T.wid + 128 * 2);

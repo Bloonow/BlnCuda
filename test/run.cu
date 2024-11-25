@@ -10,10 +10,10 @@ using check::matrix_same;
 int main(int argc, char *argv[]) {
     // 若数据规模太大，而显存空间不足分配，则会导致 Segmentation fault (core dumped)
     const float alpha = 1.f, beta = 0.f;
-    const int batchCount = 1;
-    const int M = 64;
-    const int N = 16384;
-    const int K = 64;
+    const int batchCount = 4;
+    const int M = 4096;
+    const int N = 4096;
+    const int K = 2048;
     const int aS = M * K, bS = K * N, cS = M * N;
 
     float *A, *B, *C0_ROW, *C0_COL, *C1, *C2;
@@ -22,7 +22,7 @@ int main(int argc, char *argv[]) {
     matrix_init(&C1, M, N, batchCount, 0.f); matrix_init(&C2, M, N, batchCount, 0.f);
 
     // 是否测试正确性
-    // #define TEST_ERROR 1.e-3
+    #define TEST_ERROR 1.e-5
 
     cublasLt_sgemm(A, B, C0_ROW, alpha, beta, M, N, K, batchCount, CUBLASLT_ORDER_ROW, CUBLASLT_ORDER_ROW, CUBLASLT_ORDER_ROW);
     cublasLt_sgemm(A, B, C0_COL, alpha, beta, M, N, K, batchCount, CUBLASLT_ORDER_ROW, CUBLASLT_ORDER_ROW, CUBLASLT_ORDER_COL);
