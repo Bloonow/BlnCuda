@@ -4,6 +4,9 @@
 #include <cmath>
 #include <vector>
 
+#include "../utils/buffer.cu"
+#include "../utils/ptx.cu"
+
 void random_init(float *data, size_t size) {
     for (size_t i = 0; i < size; ++i) {
         data[i] = float(rand()) / RAND_MAX;
@@ -223,145 +226,105 @@ void C_tile_wb(StgFrag C_frag,
  *
  */
 
+/**
+ * Matrix A, B, C : row-major
+ * Threadblock Tile : [M, N, K] = [128, 128, 8]
+ * Warp Tile : [M, N, K] = [32, 64, 8]
+ * Thread Tile : [M, N, K] = [8, 8, 8]
+ * A_tile and B_tile : [128, 8] and [8, 128]
+ * A_frag and B_frag : [8, 1] and [1, 8]
+ */
 __global__ __launch_bounds__(256, 2)
-void sgemm_128x128x8_kernel(const float *A,
-                            const float *B,
-                            float *C,
-                            uint32_t m,
-                            uint32_t n,
-                            uint32_t k,
-                            uint32_t A_ldg_step,    // k * sizeof(float)
-                            uint32_t B_ldg_step) {  // n * sizeof(float) * 8
-    /*
-     * matrix A & B thread block tile shared memory (double buffer)
-     * matrix A: 132 * 8 * 4Byte/item * double buffer = 4.125KB * 2
-     * matrix B: 128 * 8 * 4Byte/item * double buffer = 8KB
-     *
-     * for double buffer faster switch, A_smem requires 8KB * 2 shared memory
-     * and 16KB aligned, B_smem should be 8KB aligned, then the double buffer
-     * can be switched by only 1 xor instruction:
-     *     (uint32_t &)A_smem ^= 0x2000;
-     *     (uint32_t &)B_smem ^= 0x1000;
-     */
-    __shared__ __align__(16 * 1024) char smem[24 * 1024];
-    float *A_smem = reinterpret_cast<float *>(smem);
-    float *B_smem = reinterpret_cast<float *>(smem + 16 * 1024);
+void sgemm_rrr_128x128x8_kernel(
+    const float *A, const float *B, float *C, const float alpha,
+    const uint32_t M, const uint32_t N, const uint32_t K
+) {
+    // A and B Threadblock Tile on shared memory (double buffer)
+    // A_tile : 132 * 8 * float * double buffer = 4.125 KiB * 2
+    // B_tile : 128 * 8 * float * double buffer = 4 KiB * 2
+    // 为更快地切换 A_tile 和 B_tile 的缓冲区，
+    // A_tile 需要一块连续的 8 KiB * 2 = 2^13 B * 2 的缓冲区，故可以使用 (uint32_t&) A_smem ^= 0x2000; 进行切换
+    // B_tile 需要一块连续的 4 KiB * 2 = 2^12 B * 2 的缓冲区，故可以使用 (uint32_t&) B_smem ^= 0x1000; 进行切换
+    // 如此，共享内存双缓冲的切换，只需要使用一条异或指令即可
+    float *smem_buf = buffer::SharedMemory<float, 128 * 8 * 6>().pointer();
+    float *A_smem = reinterpret_cast<float*>(smem_buf);
+    float *B_smem = reinterpret_cast<float*>(smem_buf + 128 * 8 * 4);
 
-    // A, B and C register fragment
-    float A_frag[2][8];
-    float B_frag[2][8];
-    float C_frag[8][8];
+    // A, B ldg buffer for transfering data from gmem to smem
+    float A_ldg_buf[4], B_ldg_buf[4];
+
+    // A, B Thread Tile on register, C Thread Tile on register (double buffer)
+    float A_frag[2][8], B_frag[2][8], C_frag[8][8] = { 0 };
+
+    // A_tile and B_tile ldg pointer, Threadblock arranged as row-major
+    // [NEXT] = A_ldg_ptr + K_tile;      [eid] = A_ldg_ptr + eid * K;
+    // [NEXT] = B_ldg_ptr + K_tile * N;  [eid] = B_ldg_ptr + eid * 32;
+    const float *A_ldg_ptr = reinterpret_cast<const float*>(A + blockIdx.y * 128 * K + threadIdx.x / 8 * 4 * K + threadIdx.x % 8);
+    const float *B_ldg_ptr = reinterpret_cast<const float*>(B + blockIdx.x * 128 + threadIdx.x / 32 * N + threadIdx.x % 32);
+
+    // ldg_valid[eid] 标识 eid 数据是否为有效数据，有效元素指未越界的数据，避免 ldg 指令越界
+    uint32_t A_ldg_valid = 0, B_ldg_valid = 0;
     #pragma unroll
-    for (int i = 0; i < 8; ++i) {
-        #pragma unroll
-        for (int j = 0; j < 8; ++j) {
-            C_frag[i][j] = 0;
-        }
+    for (uint32_t eid = 0; eid < 4; ++eid) {
+        A_ldg_valid |= (uint32_t)(blockIdx.y * 128 + threadIdx.x / 8 * 4 + eid < M)   << eid;
+        B_ldg_valid |= (uint32_t)(blockIdx.x * 128 + threadIdx.x % 32 + eid * 32 < N) << eid;
     }
 
-    const uint32_t lane_id = threadIdx.x % 32;
+    // original : ·-→ x   now :  ·-→ cid
+    //            ↓              ↓
+    //            y             rid
+    // 一个Warp中的线程标识，排列成 4x8 形状
     const uint32_t warp_id = threadIdx.x / 32;
+    const uint32_t lane_id = threadIdx.x % 32;
+    const uint32_t /* mma_tid_y */ lane_rid = (lane_id / 16) * 2 + (lane_id % 2);
+    const uint32_t /* mma_tid_x */ lane_cid = (lane_id / 2) % 8;
 
-    // 4x8 threads each warp for FFMA
-    const uint32_t mma_tid_x = (lane_id / 2) % 8;
-    const uint32_t mma_tid_y = (lane_id / 16) * 2 + (lane_id % 2);
+    // A_tile and B_tile sts address
+    // [eid] = A_sts_addr + eid * sizeof(float)
+    // [eid] = B_sts_addr + eid * 32 * sizeof(float)
+    uint32_t A_sts_addr = ptx::smem_addr(A_smem + threadIdx.x % 8 * 132 + threadIdx.x / 8 * 4);
+    uint32_t B_sts_addr = ptx::smem_addr(B_smem + threadIdx.x / 32 * 128 + threadIdx.x % 32);
 
-    // A_tile & B_tile ldg pointer
-    const char *A_ldg_ptr = (const char *)(
-        A + (blockIdx.y * 128 + threadIdx.x / 8 * 4) * k + threadIdx.x % 8);
-    const char *B_ldg_ptr = (const char *)(
-        B + (threadIdx.x / 32) * n + blockIdx.x * 128 + threadIdx.x % 32);
+    // A_tile and B_tile lds address, four sub-partitions: [0][0], [0][1], [1][0], [1][1]
+    // [eid] = A_lds_addr + eid * 132 * sizeof(float);  [prid][pcid] = A_lds_addr + prid * 4 * 4 * sizeof(float)
+    // [eid] = B_lds_addr + eid * 128 * sizeof(float);  [prid][pcid] = B_lds_addr + pcid * 8 * 4 * sizeof(float)
+    uint32_t A_lds_addr = ptx::smem_addr(A_smem + warp_id / 2 * 32 + lane_rid * 4);
+    uint32_t B_lds_addr = ptx::smem_addr(B_smem + warp_id % 2 * 64 + lane_cid * 4);
 
-    // A_tile & B_tile sts/lds pointer
-    // using uint32_t pointer for faster double buffer switch
-    uint32_t A_sts_addr = smem_u32addr(
-        A_smem + (threadIdx.x % 8) * 132 + (threadIdx.x / 8) * 4);
-    uint32_t B_sts_addr = smem_u32addr(
-        B_smem + (threadIdx.x / 32) * 128 + (threadIdx.x % 32));
-
-    uint32_t A_lds_addr = smem_u32addr(
-        A_smem + (warp_id / 2) * 32 + mma_tid_y * 4);
-    uint32_t B_lds_addr = smem_u32addr(
-        B_smem + (warp_id % 2) * 64 + mma_tid_x * 4);
-
-    // ldg_guard to avoid LDG out of bound
-    uint32_t A_ldg_guard = 0;
-    #pragma unroll
-    for (int i = 0; i < 4; ++i) {
-        int m_idx = blockIdx.y * 128 + threadIdx.x / 8 * 4 + i;
-        if (m_idx < m) {
-            A_ldg_guard |= (1u << i);
-        }
-    }
-
-    uint32_t B_ldg_guard = 0;
-    #pragma unroll
-    for (int i = 0; i < 4; ++i) {
-        int n_idx = blockIdx.x * 128 + threadIdx.x % 32 + i * 32;
-        if (n_idx < n) {
-            B_ldg_guard |= (1u << i);
-        }
-    }
-
-    float A_ldg_reg[4];
-    float B_ldg_reg[4];
-
-    // 1'st A&B tile loaded before the k_tile loop
-    uint32_t k_tiles = (k + 7) / 8 - 1;
-
-    // load 1'st tile to shared memory
+    // the first A_tile and B_tile load before K-Loop, handling boundary (maybe not 8 data)
     {
-        uint32_t first_k_tile = k - k_tiles * 8;
-
+        uint32_t first_k_tile = K - ((K + 7) / 8 - 1) * 8;
         #pragma unroll
-        for (int i = 0; i < 4; ++i) {
-            bool guard = (A_ldg_guard & (1u << i)) != 0 &&
-                         threadIdx.x % 8 < first_k_tile;
-            ldg32_nc_0(A_ldg_reg[i],
-                       A_ldg_ptr + i * A_ldg_step,
-                       guard);
+        for (uint32_t eid = 0; eid < 4; ++eid) {
+            ptx::ld_gmem_zero(A_ldg_buf[eid], A_ldg_ptr + eid * K, (A_ldg_valid & (1u << eid)) && threadIdx.x % 8 < first_k_tile);
         }
-
-        sts128(A_ldg_reg[0], A_ldg_reg[1], A_ldg_reg[2], A_ldg_reg[3],
-               A_sts_addr);
-
+        ptx::st_smem(A_ldg_buf[0], A_ldg_buf[1], A_ldg_buf[2], A_ldg_buf[3], A_sts_addr);
         #pragma unroll
-        for (int i = 0; i < 4; ++i) {
-            bool guard = (B_ldg_guard & (1u << i)) != 0 &&
-                         threadIdx.x / 32 < first_k_tile;
-            ldg32_nc_0(B_ldg_reg[i],
-                       B_ldg_ptr + i * 32 * sizeof(float),
-                       guard);
+        for (uint32_t eid = 0; eid < 4; ++eid) {
+            ptx::ld_gmem_zero(B_ldg_buf[eid], B_ldg_ptr + eid * 32, (B_ldg_valid & (1u << eid)) && threadIdx.x / 32 < first_k_tile);
         }
-
         #pragma unroll
-        for (int i = 0; i < 4; ++i) {
-            sts32(B_ldg_reg[i], B_sts_addr + i * 32 * sizeof(float));
+        for (uint32_t eid = 0; eid < 4; ++eid) {
+            ptx::st_smem(B_ldg_buf[eid], B_sts_addr + eid * 32 * sizeof(float));
         }
-
         __syncthreads();
-
         // switch double buffer
         A_sts_addr ^= 0x2000;
         B_sts_addr ^= 0x1000;
-
         // ldg pointer for next tile
-        A_ldg_ptr += first_k_tile * sizeof(float);
-        B_ldg_ptr += n * first_k_tile * sizeof(float);
+        A_ldg_ptr += first_k_tile;
+        B_ldg_ptr += first_k_tile * N;
     }
 
-    // load 1'st fragment
-    lds128(A_frag[0][0], A_frag[0][1], A_frag[0][2], A_frag[0][3],
-           A_lds_addr);
-    lds128(A_frag[0][4], A_frag[0][5], A_frag[0][6], A_frag[0][7],
-           A_lds_addr + 16 * sizeof(float));
-    lds128(B_frag[0][0], B_frag[0][1], B_frag[0][2], B_frag[0][3],
-           B_lds_addr);
-    lds128(B_frag[0][4], B_frag[0][5], B_frag[0][6], B_frag[0][7],
-           B_lds_addr + 32 * sizeof(float));
+    // load the first fragment
+    lds128(A_frag[0][0], A_frag[0][1], A_frag[0][2], A_frag[0][3], A_lds_addr);
+    lds128(A_frag[0][4], A_frag[0][5], A_frag[0][6], A_frag[0][7], A_lds_addr + 16 * sizeof(float));
+    lds128(B_frag[0][0], B_frag[0][1], B_frag[0][2], B_frag[0][3], B_lds_addr);
+    lds128(B_frag[0][4], B_frag[0][5], B_frag[0][6], B_frag[0][7], B_lds_addr + 32 * sizeof(float));
 
-    // k_tiles loop
-    for (; k_tiles > 0; --k_tiles) {
+    // K-Loop
+    for (uint32_t num_k_tiles = (K + 7) / 8 - 1; num_k_tiles > 0; --num_k_tiles) {
+        ?
         #pragma unroll
         for (int k_frag = 0; k_frag < 8; ++k_frag) {
             // store next A&B tile to shared memory
