@@ -12,9 +12,9 @@ int main(int argc, char *argv[]) {
     // 若数据规模太大，而显存空间不足分配，则会导致 Segmentation fault (core dumped)
     const float alpha = 1.f, beta = 0.f;
     const int batchCount = 1;
-    const int M = 4096;
+    const int M = 5120;
     const int N = 4096;
-    const int K = 2048;
+    const int K = 4096;
     const int aS = M * K, bS = K * N, cS = M * N;
 
     float *A, *B, *C0_ROW, *C0_COL, *C1, *C2, *C3;

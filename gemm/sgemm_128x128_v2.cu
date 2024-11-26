@@ -28,31 +28,20 @@ void sgemm_rrr_128x128x8_kernel(
     float *A_smem = reinterpret_cast<float*>(smem_buf);
     float *B_smem = reinterpret_cast<float*>(smem_buf + 128 * 8 * 4);
 
-    // A, B ldg buffer for transfering data from gmem to smem
-    float A_ldg_buf[4], B_ldg_buf[4];
-
     // A, B Thread Tile on register, C Thread Tile on register (double buffer)
     float A_frag[2][8], B_frag[2][8], C_frag[8][8] = { 0 };
+
+    // 一个Warp中的线程标识，排列成 4x8 形状
+    const uint32_t warp_id = threadIdx.x / 32;
+    const uint32_t lane_id = threadIdx.x % 32;
+    const uint32_t lane_rid = (lane_id / 16) * 2 + (lane_id % 2);
+    const uint32_t lane_cid = (lane_id / 2) % 8;
 
     // A_tile and B_tile ldg pointer, Threadblock arranged as row-major
     // [NEXT] = A_ldg_ptr + K_tile;      [eid] = A_ldg_ptr + eid * K;
     // [NEXT] = B_ldg_ptr + K_tile * N;  [eid] = B_ldg_ptr + eid * 32;
     const float *A_ldg_ptr = reinterpret_cast<const float*>(A + blockIdx.y * 128 * K + threadIdx.x / 8 * 4 * K + threadIdx.x % 8);
     const float *B_ldg_ptr = reinterpret_cast<const float*>(B + blockIdx.x * 128 + threadIdx.x / 32 * N + threadIdx.x % 32);
-
-    // ldg_valid[eid] 标识 eid 数据是否为有效数据，有效元素指未越界的数据，避免 ldg 指令越界
-    uint32_t A_ldg_valid = 0, B_ldg_valid = 0;
-    #pragma unroll
-    for (uint32_t eid = 0; eid < 4; ++eid) {
-        A_ldg_valid |= (uint32_t)(blockIdx.y * 128 + threadIdx.x / 8 * 4 + eid < M)   << eid;
-        B_ldg_valid |= (uint32_t)(blockIdx.x * 128 + threadIdx.x % 32 + eid * 32 < N) << eid;
-    }
-
-    // 一个Warp中的线程标识，排列成 4x8 形状
-    const uint32_t warp_id = threadIdx.x / 32;
-    const uint32_t lane_id = threadIdx.x % 32;
-    const uint32_t /* mma_tid_y */ lane_rid = (lane_id / 16) * 2 + (lane_id % 2);
-    const uint32_t /* mma_tid_x */ lane_cid = (lane_id / 2) % 8;
 
     // A_tile and B_tile sts address
     // [eid] = A_sts_addr + eid * sizeof(float)
@@ -65,6 +54,17 @@ void sgemm_rrr_128x128x8_kernel(
     // [eid] = B_lds_addr + eid * 128 * sizeof(float);  [prid][pcid] = B_lds_addr + pcid * 8 * 4 * sizeof(float)
     uint32_t A_lds_addr = ptx::smem_addr(A_smem + warp_id / 2 * 32 + lane_rid * 4);
     uint32_t B_lds_addr = ptx::smem_addr(B_smem + warp_id % 2 * 64 + lane_cid * 4);
+
+    // ldg_valid[eid] 标识 eid 数据是否为有效数据，有效元素指未越界的数据，避免 ldg 指令越界
+    uint32_t A_ldg_valid = 0, B_ldg_valid = 0;
+    #pragma unroll
+    for (uint32_t eid = 0; eid < 4; ++eid) {
+        A_ldg_valid |= (uint32_t)(blockIdx.y * 128 + threadIdx.x / 8 * 4 + eid < M)   << eid;
+        B_ldg_valid |= (uint32_t)(blockIdx.x * 128 + threadIdx.x % 32 + eid * 32 < N) << eid;
+    }
+
+    // A, B ldg buffer for transfering data from gmem to smem
+    float A_ldg_buf[4], B_ldg_buf[4];
 
     // the first A_tile and B_tile load before K-Loop, handling boundary (maybe not 8 data)
     {
