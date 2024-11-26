@@ -1,230 +1,8 @@
-#include <cstdint>
-#include <cstdlib>
-#include <cstdio>
-#include <cmath>
-#include <vector>
+#pragma once
 
+#include <cuda.h>
 #include "../utils/buffer.cu"
 #include "../utils/ptx.cu"
-
-void random_init(float *data, size_t size) {
-    for (size_t i = 0; i < size; ++i) {
-        data[i] = float(rand()) / RAND_MAX;
-    }
-}
-
-bool check(const float *A,
-           const float *B,
-           const float *C,
-           int m, int n, int k) {
-    for (int i = 0; i < m; ++i) {
-        for (int j = 0; j < n; ++j) {
-            float sum = 0.f;
-            for (int p = 0; p < k; ++p) {
-                sum += A[i * k + p] * B[j + p * n];
-            }
-
-            if (std::fabs(sum - C[i * n + j]) / std::fabs(sum) > 1e-5f) {
-                printf("C[%d][%d] not match, %f vs %f\n", i, j, sum, C[i * n + j]);
-                return false;
-            }
-        }
-    }
-
-    return true;
-}
-
-__device__ __forceinline__
-uint32_t smem_u32addr(const void *smem_ptr) {
-    uint32_t addr;
-    asm ("{.reg .u64 u64addr;\n"
-         " cvta.to.shared.u64 u64addr, %1;\n"
-         " cvt.u32.u64 %0, u64addr;}\n"
-         : "=r"(addr)
-         : "l"(smem_ptr)
-    );
-
-    return addr;
-}
-
-__device__ __forceinline__
-void ldg32_nc(float &reg, const void *ptr, bool guard) {
-    asm volatile (
-        "{.reg .pred p;\n"
-        " setp.ne.b32 p, %2, 0;\n"
-#if __CUDACC_VER_MAJOR__ >= 11 && __CUDACC_VER_MINOR__ >= 4 && __CUDA_ARCH__ >= 750
-        " @p ld.global.nc.L2::128B.f32 %0, [%1];}\n"
-#else
-        " @p ld.global.nc.f32 %0, [%1];}\n"
-#endif
-        : "=f"(reg)
-        : "l"(ptr), "r"((int)guard)
-    );
-}
-
-__device__ __forceinline__
-void ldg32_nc_0(float &reg, const void *ptr, bool guard) {
-    asm volatile (
-        "{.reg .pred p;\n"
-        " setp.ne.b32 p, %2, 0;\n"
-        " @!p mov.b32 %0, 0;\n"
-#if __CUDACC_VER_MAJOR__ >= 11 && __CUDACC_VER_MINOR__ >= 4 && \
-    __CUDA_ARCH__ >= 750
-        " @p ld.global.nc.L2::128B.f32 %0, [%1];}\n"
-#else
-        " @p ld.global.nc.f32 %0, [%1];}\n"
-#endif
-        : "=f"(reg)
-        : "l"(ptr), "r"((int)guard)
-    );
-}
-
-__device__ __forceinline__
-void stg32(const float &reg, void *ptr, bool guard) {
-    asm volatile (
-        "{.reg .pred p;\n"
-        " setp.ne.b32 p, %2, 0;\n"
-        " @p st.global.f32 [%0], %1;}\n"
-        : : "l"(ptr), "f"(reg), "r"((int)guard)
-    );
-}
-
-__device__ __forceinline__
-void lds128(float &reg0, float &reg1,
-            float &reg2, float &reg3,
-            const uint32_t &addr) {
-    asm volatile (
-        "ld.shared.v4.f32 {%0, %1, %2, %3}, [%4];\n"
-        : "=f"(reg0), "=f"(reg1), "=f"(reg2), "=f"(reg3)
-        : "r"(addr)
-    );
-}
-
-__device__ __forceinline__
-void sts32(const float &reg, const uint32_t &addr) {
-    asm volatile (
-        "st.shared.f32 [%0], %1;\n"
-        : : "r"(addr), "f"(reg)
-    );
-}
-
-__device__ __forceinline__
-void sts128(const float &reg0, const float &reg1,
-            const float &reg2, const float &reg3,
-            const uint32_t &addr) {
-    asm volatile (
-        "st.shared.v4.f32 [%0], {%1, %2, %3, %4};\n"
-        : : "r"(addr), "f"(reg0), "f"(reg1), "f"(reg2), "f"(reg3)
-    );
-}
-
-struct StgFrag {
-    float data[4][4];
-
-    __device__ __forceinline__
-    StgFrag(const float (&C_frag)[8][8], int tile_x, int tile_y) {
-        #pragma unroll
-        for (int i = 0; i < 4; ++i) {
-            #pragma unroll
-            for (int j = 0; j < 4; ++j) {
-                data[i][j] = C_frag[tile_y * 4 + i][tile_x * 4 + j];
-            }
-        }
-    }
-};
-
-__device__ __noinline__
-void C_tile_wb(StgFrag C_frag,
-               float *C_stg_ptr,
-               const float *C_lds_ptr,
-               uint32_t C_sts_addr,
-               uint32_t m,
-               uint32_t n,
-               uint32_t m_idx,
-               uint32_t n_idx) {
-    __syncthreads();
-
-    #pragma unroll
-    for (int i = 0; i < 4; ++i) {
-        sts128(C_frag.data[i][0],
-               C_frag.data[i][1],
-               C_frag.data[i][2],
-               C_frag.data[i][3],
-               C_sts_addr + i * 8 * sizeof(float4));
-    }
-
-    __syncthreads();
-
-    uint32_t m_guard = m < m_idx ? 0 : m - m_idx;
-
-    #pragma unroll
-    for (int i = 0; i < 16; ++i) {
-        stg32(C_lds_ptr[i * 32],
-              C_stg_ptr + i * n,
-              i < m_guard && n_idx < n);
-    }
-}
-
-/*
- * matrix A, B and C: row-major
- *
- * mma block:
- * thread block tile: m128n128k8
- * warp tile: m32n64k8
- * thread tile: m8n8k8
- * thread fragment:
- *     matrixA: 8x1 FP32
- *     matrixB: 1x8 FP32
- *
- * ----------------------------------------------------------------
- * thread block tile map:
- *
- *                                128
- *                    --|---------------------|
- *             B_tile  8|                     |
- *                    --|---------------------|
- *
- *  A_tile   | 8 |      |    64    |
- *         --|---|    --|----------|----------|
- *           |   |    32|  warp_0  |  warp_1  |
- *           |   |    --|----------|----------|
- *           |   |      |  warp_2  |  warp_3  |
- *        128|   |      |----------|----------|
- *           |   |      |  warp_4  |  warp_5  |
- *           |   |      |----------|----------|
- *           |   |      |  warp_6  |  warp_7  |
- *         --|---|      |----------|----------|
- *
- * ----------------------------------------------------------------
- * warp tile map:
- *
- * 'z' thread map to avoid LDS.128 shared memory broadcast limitation.
- *
- *              |              32               ||
- *     B_frag --|---|---|---|---|---|---|---|---||---|---|---|---|---|---|---|---|
- *             1|///|   |   |   |   |   |   |   ||///|   |   |   |   |   |   |   |
- *            --|---|---|---|---|---|---|---|---||---|---|---|---|---|---|---|---|
- * A_frag       | 4 |                           ||
- *    | 1 |                                     ||
- *  --|---|--   |---|---|---|---|---|---|---|---||---|---------------------------|
- *    |///|4    |t0 |t2 |t4 |t6 |t8 |t10|t12|t14||t0 |                           |
- *    |---|--   |---|---|---|---|---|---|---|---||---|                           |
- *    |   |     |t1 |t3 |t5 |t7 |t9 |t11|t13|t15||                               |
- *  16|---|     |---|---|---|---|---|---|---|---||                               |
- *    |   |     |t16|t18|t20|t22|t24|t26|t28|t30||                               |
- *    |---|     |---|---|---|---|---|---|---|---||                               |
- *    |   |     |t17|t19|t21|t23|t25|t27|t29|t31||                               |
- *  ==|===|=====|===|===|===|===|===|===|===|===||===|============================
- *    |///|     |t0 |                           ||t0 |                           |
- *    |---|     |---|                           ||---|                           |
- *    |   |     |                               ||                               |
- *    |---|     |                               ||                               |
- *    |   |     |                               ||                               |
- *    |---|     |                               ||                               |
- *    |   |     |                               ||                               |
- *    |---|     |-------------------------------||-------------------------------|
- *
- */
 
 /**
  * Matrix A, B, C : row-major
@@ -236,7 +14,7 @@ void C_tile_wb(StgFrag C_frag,
  */
 __global__ __launch_bounds__(256, 2)
 void sgemm_rrr_128x128x8_kernel(
-    const float *A, const float *B, float *C, const float alpha,
+    const float *A, const float *B, float *C,
     const uint32_t M, const uint32_t N, const uint32_t K
 ) {
     // A and B Threadblock Tile on shared memory (double buffer)
@@ -270,9 +48,6 @@ void sgemm_rrr_128x128x8_kernel(
         B_ldg_valid |= (uint32_t)(blockIdx.x * 128 + threadIdx.x % 32 + eid * 32 < N) << eid;
     }
 
-    // original : ·-→ x   now :  ·-→ cid
-    //            ↓              ↓
-    //            y             rid
     // 一个Warp中的线程标识，排列成 4x8 形状
     const uint32_t warp_id = threadIdx.x / 32;
     const uint32_t lane_id = threadIdx.x % 32;
@@ -317,246 +92,182 @@ void sgemm_rrr_128x128x8_kernel(
     }
 
     // load the first fragment
-    lds128(A_frag[0][0], A_frag[0][1], A_frag[0][2], A_frag[0][3], A_lds_addr);
-    lds128(A_frag[0][4], A_frag[0][5], A_frag[0][6], A_frag[0][7], A_lds_addr + 16 * sizeof(float));
-    lds128(B_frag[0][0], B_frag[0][1], B_frag[0][2], B_frag[0][3], B_lds_addr);
-    lds128(B_frag[0][4], B_frag[0][5], B_frag[0][6], B_frag[0][7], B_lds_addr + 32 * sizeof(float));
+    ptx::ld_smem(A_frag[0][0], A_frag[0][1], A_frag[0][2], A_frag[0][3], A_lds_addr);
+    ptx::ld_smem(A_frag[0][4], A_frag[0][5], A_frag[0][6], A_frag[0][7], A_lds_addr + 16 * sizeof(float));
+    ptx::ld_smem(B_frag[0][0], B_frag[0][1], B_frag[0][2], B_frag[0][3], B_lds_addr);
+    ptx::ld_smem(B_frag[0][4], B_frag[0][5], B_frag[0][6], B_frag[0][7], B_lds_addr + 32 * sizeof(float));
 
-    // K-Loop
+    // K-Loop, and K_tile is 8
     for (uint32_t num_k_tiles = (K + 7) / 8 - 1; num_k_tiles > 0; --num_k_tiles) {
-        ?
         #pragma unroll
         for (int k_frag = 0; k_frag < 8; ++k_frag) {
-            // store next A&B tile to shared memory
+            // K_tile 次计算即将执行完毕，将下一个 A_tile 和 B_tile 写入共享内存
             if (k_frag == 7) {
-                sts128(A_ldg_reg[0], A_ldg_reg[1], A_ldg_reg[2], A_ldg_reg[3],
-                       A_sts_addr);
+                ptx::st_smem(A_ldg_buf[0], A_ldg_buf[1], A_ldg_buf[2], A_ldg_buf[3], A_sts_addr);
                 #pragma unroll
-                for (int i = 0; i < 4; ++i) {
-                    sts32(B_ldg_reg[i], B_sts_addr + i * 32 * sizeof(float));
+                for (uint32_t eid = 0; eid < 4; ++eid) {
+                    ptx::st_smem(B_ldg_buf[eid], B_sts_addr + eid * 32 * sizeof(float));
                 }
-
                 __syncthreads();
-
                 // switch double buffer
-                A_lds_addr ^= 0x2000;
-                B_lds_addr ^= 0x1000;
                 A_sts_addr ^= 0x2000;
                 B_sts_addr ^= 0x1000;
-
+                A_lds_addr ^= 0x2000;
+                B_lds_addr ^= 0x1000;
                 // ldg pointer for next tile
-                A_ldg_ptr += 8 * sizeof(float);
-                B_ldg_ptr += B_ldg_step;
+                A_ldg_ptr += 8;
+                B_ldg_ptr += 8 * N;
             }
-
-            // load next A&B fragment from shared memory to register
-            lds128(A_frag[(k_frag + 1) % 2][0],
-                   A_frag[(k_frag + 1) % 2][1],
-                   A_frag[(k_frag + 1) % 2][2],
-                   A_frag[(k_frag + 1) % 2][3],
-                   A_lds_addr + (k_frag + 1) % 8 * 132 * sizeof(float));
-            lds128(A_frag[(k_frag + 1) % 2][4],
-                   A_frag[(k_frag + 1) % 2][5],
-                   A_frag[(k_frag + 1) % 2][6],
-                   A_frag[(k_frag + 1) % 2][7],
-                   A_lds_addr + ((k_frag + 1) % 8 * 132 + 16) * sizeof(float));
-            lds128(B_frag[(k_frag + 1) % 2][0],
-                   B_frag[(k_frag + 1) % 2][1],
-                   B_frag[(k_frag + 1) % 2][2],
-                   B_frag[(k_frag + 1) % 2][3],
-                   B_lds_addr + (k_frag + 1) % 8 * 128 * sizeof(float));
-            lds128(B_frag[(k_frag + 1) % 2][4],
-                   B_frag[(k_frag + 1) % 2][5],
-                   B_frag[(k_frag + 1) % 2][6],
-                   B_frag[(k_frag + 1) % 2][7],
-                   B_lds_addr + ((k_frag + 1) % 8 * 128 + 32) * sizeof(float));
-
-            // load next A&B tile
+            // 读取下一次计算所需的 A_frag 和 B_frag 并写入寄存器
+            ptx::ld_smem(
+                A_frag[(k_frag + 1) % 2][0], A_frag[(k_frag + 1) % 2][1],
+                A_frag[(k_frag + 1) % 2][2], A_frag[(k_frag + 1) % 2][3],
+                A_lds_addr + (k_frag + 1) % 8 * 132 * sizeof(float)
+            );
+            ptx::ld_smem(
+                A_frag[(k_frag + 1) % 2][4], A_frag[(k_frag + 1) % 2][5],
+                A_frag[(k_frag + 1) % 2][6], A_frag[(k_frag + 1) % 2][7],
+                A_lds_addr + ((k_frag + 1) % 8 * 132 + 16) * sizeof(float)
+            );
+            ptx::ld_smem(
+                B_frag[(k_frag + 1) % 2][0], B_frag[(k_frag + 1) % 2][1],
+                B_frag[(k_frag + 1) % 2][2], B_frag[(k_frag + 1) % 2][3],
+                B_lds_addr + (k_frag + 1) % 8 * 128 * sizeof(float)
+            );
+            ptx::ld_smem(
+                B_frag[(k_frag + 1) % 2][4], B_frag[(k_frag + 1) % 2][5],
+                B_frag[(k_frag + 1) % 2][6], B_frag[(k_frag + 1) % 2][7],
+                B_lds_addr + ((k_frag + 1) % 8 * 128 + 32) * sizeof(float)
+            );
+            // K_tile 的第一次计算之前，读取下一个 A_tile 和 B_tile 数据
             if (k_frag == 0) {
                 #pragma unroll
-                for (int i = 0; i < 4; ++i) {
-                    ldg32_nc(A_ldg_reg[i],
-                             A_ldg_ptr + i * A_ldg_step,
-                             (A_ldg_guard & (1u << i)) != 0);
+                for (uint32_t eid = 0; eid < 4; ++eid) {
+                    ptx::ld_gmem_zero(A_ldg_buf[eid], A_ldg_ptr + eid * K, A_ldg_valid & (1u << eid));
                 }
-
                 #pragma unroll
-                for (int i = 0; i < 4; ++i) {
-                    ldg32_nc(B_ldg_reg[i],
-                             B_ldg_ptr + i * 32 * sizeof(float),
-                             (B_ldg_guard & (1u << i)) != 0);
+                for (uint32_t eid = 0; eid < 4; ++eid) {
+                    ptx::ld_gmem_zero(B_ldg_buf[eid], B_ldg_ptr + eid * 32, B_ldg_valid & (1u << eid));
                 }
             }
-
-            // FFMA loop
+            // 执行FFMA计算
             #pragma unroll
-            for (int i = 0; i < 8; ++i) {
+            for (uint32_t i = 0; i < 8; ++i) {
                 #pragma unroll
-                for (int j = 0; j < 8; ++j) {
-                    C_frag[i][j] += A_frag[k_frag % 2][i] *
-                                    B_frag[k_frag % 2][j];
+                for (uint32_t j = 0; j < 8; ++j) {
+                    C_frag[i][j] += A_frag[k_frag % 2][i] * B_frag[k_frag % 2][j];
                 }
             }
         }
     }
-
-    // FFMA for the last tile
+    // 最后一个 tile 的迭代
     #pragma unroll
     for (int k_frag = 0; k_frag < 8; ++k_frag) {
+        // 读取下一次计算所需的 A_frag 和 B_frag 并写入寄存器
         if (k_frag < 7) {
-            // load next A&B fragment from shared memory to register
-            lds128(A_frag[(k_frag + 1) % 2][0],
-                   A_frag[(k_frag + 1) % 2][1],
-                   A_frag[(k_frag + 1) % 2][2],
-                   A_frag[(k_frag + 1) % 2][3],
-                   A_lds_addr + (k_frag + 1) % 8 * 132 * sizeof(float));
-            lds128(A_frag[(k_frag + 1) % 2][4],
-                   A_frag[(k_frag + 1) % 2][5],
-                   A_frag[(k_frag + 1) % 2][6],
-                   A_frag[(k_frag + 1) % 2][7],
-                   A_lds_addr + ((k_frag + 1) % 8 * 132 + 16) * sizeof(float));
-            lds128(B_frag[(k_frag + 1) % 2][0],
-                   B_frag[(k_frag + 1) % 2][1],
-                   B_frag[(k_frag + 1) % 2][2],
-                   B_frag[(k_frag + 1) % 2][3],
-                   B_lds_addr + (k_frag + 1) % 8 * 128 * sizeof(float));
-            lds128(B_frag[(k_frag + 1) % 2][4],
-                   B_frag[(k_frag + 1) % 2][5],
-                   B_frag[(k_frag + 1) % 2][6],
-                   B_frag[(k_frag + 1) % 2][7],
-                   B_lds_addr + ((k_frag + 1) % 8 * 128 + 32) * sizeof(float));
+            ptx::ld_smem(
+                A_frag[(k_frag + 1) % 2][0], A_frag[(k_frag + 1) % 2][1],
+                A_frag[(k_frag + 1) % 2][2], A_frag[(k_frag + 1) % 2][3],
+                A_lds_addr + (k_frag + 1) % 8 * 132 * sizeof(float)
+            );
+            ptx::ld_smem(
+                A_frag[(k_frag + 1) % 2][4], A_frag[(k_frag + 1) % 2][5],
+                A_frag[(k_frag + 1) % 2][6], A_frag[(k_frag + 1) % 2][7],
+                A_lds_addr + ((k_frag + 1) % 8 * 132 + 16) * sizeof(float)
+            );
+            ptx::ld_smem(
+                B_frag[(k_frag + 1) % 2][0], B_frag[(k_frag + 1) % 2][1],
+                B_frag[(k_frag + 1) % 2][2], B_frag[(k_frag + 1) % 2][3],
+                B_lds_addr + (k_frag + 1) % 8 * 128 * sizeof(float)
+            );
+            ptx::ld_smem(
+                B_frag[(k_frag + 1) % 2][4], B_frag[(k_frag + 1) % 2][5],
+                B_frag[(k_frag + 1) % 2][6], B_frag[(k_frag + 1) % 2][7],
+                B_lds_addr + ((k_frag + 1) % 8 * 128 + 32) * sizeof(float)
+            );
         }
-
-        // FFMA loop
+        // 执行FFMA计算
         #pragma unroll
-        for (int i = 0; i < 8; ++i) {
+        for (uint32_t i = 0; i < 8; ++i) {
             #pragma unroll
-            for (int j = 0; j < 8; ++j) {
-                C_frag[i][j] += A_frag[k_frag % 2][i] *
-                                B_frag[k_frag % 2][j];
+            for (uint32_t j = 0; j < 8; ++j) {
+                C_frag[i][j] += A_frag[k_frag % 2][i] * B_frag[k_frag % 2][j];
             }
         }
     }
 
-    // C_tile write back, reuse A&B tile shared memory buffer
-    uint32_t C_sts_addr = smem_u32addr((float4 *)(smem + warp_id * 2048) +
-                                       mma_tid_y * 4 * 8 + mma_tid_x);
-    const float *C_lds_ptr = (float *)(smem + warp_id * 2048) + lane_id;
-
+    // 重用 128 * 48 * float 共享内存空间，行主序写回矩阵 C，每次写回一个分区的 16 * 32 * 8 = 128 * 32 * float 数据
+    // [trid] = C_sts_addr + trid * 32 * sizeof(float);  trid = 0, 1, 2, 3, for 4x4 Thread Tile
+    uint32_t C_sts_addr = ptx::smem_addr(smem_buf + warp_id * 16 * 32 + lane_rid * 4 * 32 + lane_cid * 4);
+    // [iter] = C_lds_ptr + iter * 32;  iter = 0, 1, 2, ..., 15, for 16x32 Warp Tile
+    const float *C_lds_ptr = reinterpret_cast<const float*>(smem_buf + warp_id * 16 * 32 + lane_id);
+    // 将矩阵 C 写回设备内存时的，每个线程对应数据的偏移
     uint32_t m_idx = blockIdx.y * 128 + warp_id / 2 * 32;
     uint32_t n_idx = blockIdx.x * 128 + warp_id % 2 * 64 + lane_id;
-
-    float *C_stg_ptr = C + m_idx * n + n_idx;
-
-    if (m_idx >= m) {
-        return;
-    } else if (m_idx + 32 <= m) {
-        uint32_t n_guard = n < n_idx ? 0 : n - n_idx;
-
+    // [prid][pcid][iter] = C_stg_ptr + prid * 16 * N + pcid * 32 + iter * N
+    float *C_stg_ptr = reinterpret_cast<float*>(C + m_idx * N + n_idx);
+    #pragma unroll
+    for (uint32_t prid = 0; prid < 2; ++prid) {
         #pragma unroll
-        for (int i = 0; i < 2; ++i) {
+        for (uint32_t pcid = 0; pcid < 2; ++pcid) {
+            __syncthreads();
             #pragma unroll
-            for (int j = 0; j < 2; ++j) {
-                __syncthreads();
-
-                #pragma unroll
-                for (int p = 0; p < 4; ++p) {
-                    sts128(C_frag[i * 4 + p][j * 4],
-                           C_frag[i * 4 + p][j * 4 + 1],
-                           C_frag[i * 4 + p][j * 4 + 2],
-                           C_frag[i * 4 + p][j * 4 + 3],
-                           C_sts_addr + p * 8 * sizeof(float4));
-                }
-
-                __syncthreads();
-
-                #pragma unroll
-                for (int p = 0; p < 16; ++p) {
-                    stg32(C_lds_ptr[p * 32],
-                          C_stg_ptr + (i * 16 + p) * n + j * 32,
-                          j * 32 < n_guard);
-                }
+            for (uint32_t trid = 0; trid < 4; ++trid) {
+                ptx::st_smem(
+                    C_frag[prid * 4 + trid][pcid * 4 + 0], C_frag[prid * 4 + trid][pcid * 4 + 1],
+                    C_frag[prid * 4 + trid][pcid * 4 + 2], C_frag[prid * 4 + trid][pcid * 4 + 3],
+                    C_sts_addr + trid * 32 * sizeof(float)
+                );
             }
-        }
-    } else {
-        #pragma unroll
-        for (int i = 0; i < 2; ++i) {
+            __syncthreads();
             #pragma unroll
-            for (int j = 0; j < 2; ++j) {
-                StgFrag stg_frag(C_frag, j, i);
-
-                C_tile_wb(stg_frag,
-                          C_stg_ptr + i * 16 * n + j * 32,
-                          C_lds_ptr,
-                          C_sts_addr,
-                          m,
-                          n,
-                          m_idx + i * 16,
-                          n_idx + j * 32);
+            for (uint32_t iter = 0; iter < 16; ++iter) {
+                ptx::st_gmem(
+                    C_lds_ptr[iter * 32], C_stg_ptr + prid * 16 * N + pcid * 32 + iter * N,
+                    (m_idx + prid * 16 + iter < M) && (n_idx + pcid * 32 < N)
+                );
             }
         }
     }
 }
 
-int main() {
-    int m = 5120;
-    int n = 4096;
-    int k = 4096;
-    int n_iter = 10;
-
-    float *h_A, *h_B, *h_C;
-    cudaMallocHost(&h_A, m * k * sizeof(float));
-    cudaMallocHost(&h_B, k * n * sizeof(float));
-    cudaMallocHost(&h_C, m * n * sizeof(float));
-    random_init(h_A, m * k);
-    random_init(h_B, k * n);
-
-    float *d_A, *d_B, *d_C;
-    cudaMalloc(&d_A, m * k * sizeof(float));
-    cudaMalloc(&d_B, k * n * sizeof(float));
-    cudaMalloc(&d_C, m * n * sizeof(float));
-
-    cudaMemcpy(d_A, h_A, m * k * sizeof(float), cudaMemcpyDefault);
-    cudaMemcpy(d_B, h_B, k * n * sizeof(float), cudaMemcpyDefault);
-
-    cudaEvent_t start, end;
-    cudaEventCreate(&start);
-    cudaEventCreate(&end);
-
-    dim3 grid((n + 127) / 128, (m + 127) / 128);
-
-    // warmup
-    sgemm_128x128x8_kernel<<<grid, 256>>>(
-        d_A, d_B, d_C, m, n, k, k * sizeof(float), n * sizeof(float) * 8);
-
-    cudaEventRecord(start);
-    for (int i = 0; i < n_iter; ++i) {
-        sgemm_128x128x8_kernel<<<grid, 256>>>(
-            d_A, d_B, d_C, m, n, k, k * sizeof(float), n * sizeof(float) * 8);
+__device__ __forceinline__
+void store_result_smem_rr(
+    float Creg[8][8], float *smem_buf, float *C,
+    const uint32_t M, const uint32_t N, const uint32_t cS,
+    const uint32_t brid, const uint32_t bcid, const uint32_t tid,
+    const uint32_t wrows, const uint32_t wcols, const uint32_t wrid, const uint32_t wcid,
+    const uint32_t lrid, const uint32_t lcid
+) {
+    // 使用 32x128 共享内存搬运 128x128 数据（需 4 次），每次每线程写回 2x8 数据 Creg[r][:], Creg[r + 4][:]
+    // [NEXT] C_smem_st + (tile_rid * wrows * 128 + tile_cid * wcols * 4) * sizeof(float)
+    uint32_t C_smem_st = ptx::smem_addr(smem_buf + (wrid * wrows * 2 * 128 + wcid * wcols * 8) + (lrid * 128 + lcid * 4));
+    float *C_block = C + (blockIdx.z * cS + brid * 128 * N + bcid * 128);
+    for (uint32_t r = 0; r < 4; ++r) {
+        __syncthreads();
+        // 将数据写入到共享内存
+        ptx::st_smem(Creg[r][0], Creg[r][1], Creg[r][2], Creg[r][3], C_smem_st + (0 * wrows * 128 + 0 * wcols * 4) * sizeof(float));
+        ptx::st_smem(Creg[r][4], Creg[r][5], Creg[r][6], Creg[r][7], C_smem_st + (0 * wrows * 128 + 1 * wcols * 4) * sizeof(float));
+        ptx::st_smem(Creg[r+4][0], Creg[r+4][1], Creg[r+4][2], Creg[r+4][3], C_smem_st + (1 * wrows * 128 + 0 * wcols * 4) * sizeof(float));
+        ptx::st_smem(Creg[r+4][4], Creg[r+4][5], Creg[r+4][6], Creg[r+4][7], C_smem_st + (1 * wrows * 128 + 1 * wcols * 4) * sizeof(float));
+        __syncthreads();
+        // 使用 2x128 排列的线程搬运 32x128 共享内存（需 16 次），每次每线程写回 1 个数据
+        #pragma unroll
+        for (uint32_t gmem_row = r; gmem_row < 128; gmem_row += 4 * 2) {
+            ptx::st_gmem(
+                *reinterpret_cast<float*>(smem_buf + gmem_row / 4 * 128 + tid),
+                C_block + (gmem_row + tid / 128 * 4) * N + (tid % 128),
+                (brid * 128 + gmem_row + tid / 128 * 4 < M) && (bcid * 128 + tid % 128 < N)
+            );
+        }
     }
-    cudaEventRecord(end);
-    cudaEventSynchronize(end);
-
-    float ms;
-    cudaEventElapsedTime(&ms, start, end);
-    cudaEventDestroy(start);
-    cudaEventDestroy(end);
-
-    long workload = n_iter * long(m) * n * k * 2;
-    double gflops = (double(workload) / 1e9) / (double(ms) / 1e3);
-    printf("Performance: %fGFLOPS\n", gflops);
-
-    cudaMemcpy(h_C, d_C, m * n * sizeof(float), cudaMemcpyDefault);
-
-    bool chk = check(h_A, h_B, h_C, m, n, k);
-    printf("Matrix_C check: %s\n", chk ? "OK" : "Failed");
-
-    cudaFree(d_A);
-    cudaFree(d_B);
-    cudaFree(d_C);
-    cudaFreeHost(h_A);
-    cudaFreeHost(h_B);
-    cudaFreeHost(h_C);
 }
 
-
+void sgemm_rrr(
+    const float *A, const float *B, float *C,
+    const uint32_t M, const uint32_t N, const uint32_t K
+) {
+    const dim3 block_size(256, 1, 1);
+    const dim3 grid_size((N + 127) / 128, (M + 127) / 128, 1);
+    sgemm_rrr_128x128x8_kernel<<<grid_size, block_size>>>(A, B, C, M, N, K);
+}
