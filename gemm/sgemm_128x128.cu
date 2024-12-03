@@ -38,15 +38,15 @@ void store_result_smem_rr(
     for (uint32_t r = 0; r < 4; ++r) {
         __syncthreads();
         // 将数据写入到共享内存
-        ptx::st_smem(Creg[r][0], Creg[r][1], Creg[r][2], Creg[r][3], C_smem_st + (0 * wrows * 128 + 0 * wcols * 4) * sizeof(float));
-        ptx::st_smem(Creg[r][4], Creg[r][5], Creg[r][6], Creg[r][7], C_smem_st + (0 * wrows * 128 + 1 * wcols * 4) * sizeof(float));
-        ptx::st_smem(Creg[r+4][0], Creg[r+4][1], Creg[r+4][2], Creg[r+4][3], C_smem_st + (1 * wrows * 128 + 0 * wcols * 4) * sizeof(float));
-        ptx::st_smem(Creg[r+4][4], Creg[r+4][5], Creg[r+4][6], Creg[r+4][7], C_smem_st + (1 * wrows * 128 + 1 * wcols * 4) * sizeof(float));
+        ptx::sts(Creg[r][0], Creg[r][1], Creg[r][2], Creg[r][3], C_smem_st + (0 * wrows * 128 + 0 * wcols * 4) * sizeof(float));
+        ptx::sts(Creg[r][4], Creg[r][5], Creg[r][6], Creg[r][7], C_smem_st + (0 * wrows * 128 + 1 * wcols * 4) * sizeof(float));
+        ptx::sts(Creg[r+4][0], Creg[r+4][1], Creg[r+4][2], Creg[r+4][3], C_smem_st + (1 * wrows * 128 + 0 * wcols * 4) * sizeof(float));
+        ptx::sts(Creg[r+4][4], Creg[r+4][5], Creg[r+4][6], Creg[r+4][7], C_smem_st + (1 * wrows * 128 + 1 * wcols * 4) * sizeof(float));
         __syncthreads();
         // 使用 2x128 排列的线程搬运 32x128 共享内存（需 16 次），每次每线程写回 1 个数据
         #pragma unroll
         for (uint32_t gmem_row = r; gmem_row < 128; gmem_row += 4 * 2) {
-            ptx::st_gmem(
+            ptx::stg(
                 *reinterpret_cast<float*>(smem_buf + gmem_row / 4 * 128 + tid),
                 C_block + (gmem_row + tid / 128 * 4) * N + (tid % 128),
                 (brid * 128 + gmem_row + tid / 128 * 4 < M) && (bcid * 128 + tid % 128 < N)
@@ -70,15 +70,15 @@ void store_result_smem_rc(
     for (uint32_t c = 0; c < 4; ++c) {
         __syncthreads();
         // 将数据写入到共享内存
-        ptx::st_smem(Creg[0][c], Creg[1][c], Creg[2][c], Creg[3][c], C_smem_st + (0 * wcols * 128 + 0 * wrows * 4) * sizeof(float));
-        ptx::st_smem(Creg[4][c], Creg[5][c], Creg[6][c], Creg[7][c], C_smem_st + (0 * wcols * 128 + 1 * wrows * 4) * sizeof(float));
-        ptx::st_smem(Creg[0][c+4], Creg[1][c+4], Creg[2][c+4], Creg[3][c+4], C_smem_st + (1 * wcols * 128 + 0 * wrows * 4) * sizeof(float));
-        ptx::st_smem(Creg[4][c+4], Creg[5][c+4], Creg[6][c+4], Creg[7][c+4], C_smem_st + (1 * wcols * 128 + 1 * wrows * 4) * sizeof(float));
+        ptx::sts(Creg[0][c], Creg[1][c], Creg[2][c], Creg[3][c], C_smem_st + (0 * wcols * 128 + 0 * wrows * 4) * sizeof(float));
+        ptx::sts(Creg[4][c], Creg[5][c], Creg[6][c], Creg[7][c], C_smem_st + (0 * wcols * 128 + 1 * wrows * 4) * sizeof(float));
+        ptx::sts(Creg[0][c+4], Creg[1][c+4], Creg[2][c+4], Creg[3][c+4], C_smem_st + (1 * wcols * 128 + 0 * wrows * 4) * sizeof(float));
+        ptx::sts(Creg[4][c+4], Creg[5][c+4], Creg[6][c+4], Creg[7][c+4], C_smem_st + (1 * wcols * 128 + 1 * wrows * 4) * sizeof(float));
         __syncthreads();
         // 使用 128x2 排列的线程搬运 128x32 共享内存（需 16 次），每次每线程写回 1 个数据
         #pragma unroll
         for (uint32_t gmem_column = c; gmem_column < 128; gmem_column += 4 * 2) {
-            ptx::st_gmem(
+            ptx::stg(
                 *reinterpret_cast<float*>(smem_buf + gmem_column / 4 * 128 + tid),
                 C_block + (gmem_column + tid / 128 * 4) * M + (tid % 128),
                 (brid * 128 + tid % 128 < M) && (bcid * 128 + gmem_column + tid / 128 * 4 < N)
@@ -125,14 +125,14 @@ void compute_block_rrr(
     uint32_t kstart = K - ((K + 7) / 8 - 1) * 8;  // [1, 2, 3, ..., 8]
     #pragma unroll
     for (uint32_t eid = 0; eid < 4; ++eid) {
-        ptx::ld_gmem_zero(Atrans[eid], A_tid + eid * K, (A_valid & (1u << eid)) && (tid % 8 < kstart));
-        ptx::ld_gmem_zero(Btrans[eid], B_tid + eid * 32, (B_valid & (1u << eid)) && (wid < kstart));
+        ptx::ldg_zero(Atrans[eid], A_tid + eid * K, (A_valid & (1u << eid)) && (tid % 8 < kstart));
+        ptx::ldg_zero(Btrans[eid], B_tid + eid * 32, (B_valid & (1u << eid)) && (wid < kstart));
     }
     // 将预取数据写入到共享内存
-    ptx::st_smem(Atrans[0], Atrans[1], Atrans[2], Atrans[3], A_smem_st);
+    ptx::sts(Atrans[0], Atrans[1], Atrans[2], Atrans[3], A_smem_st);
     #pragma unroll
     for (uint32_t eid = 0; eid < 4; ++eid) {
-        ptx::st_smem(Btrans[eid], B_smem_st + eid * 32 * sizeof(float));
+        ptx::sts(Btrans[eid], B_smem_st + eid * 32 * sizeof(float));
     }
     __syncthreads();
     // 切换缓冲区
@@ -147,16 +147,16 @@ void compute_block_rrr(
         // 预取 kth 的数据
         #pragma unroll
         for (uint32_t eid = 0; eid < 4; ++eid) {
-            ptx::ld_gmem(Atrans[eid], A_tid + eid * K, A_valid & (1u << eid));
-            ptx::ld_gmem(Btrans[eid], B_tid + eid * 32, B_valid & (1u << eid));
+            ptx::ldg(Atrans[eid], A_tid + eid * K, A_valid & (1u << eid));
+            ptx::ldg(Btrans[eid], B_tid + eid * 32, B_valid & (1u << eid));
         }
         // 每个线程计算 C 的子区域，采用向量外积方式，在 K_block 维度上循环迭代
         #pragma unroll
         for (uint32_t kid = 0; kid < 8; ++kid) {
-            ptx::ld_smem(Areg[0], Areg[1], Areg[2], Areg[3], A_smem_ld + (0 * wrows * 4 + kid * 132) * sizeof(float));
-            ptx::ld_smem(Areg[4], Areg[5], Areg[6], Areg[7], A_smem_ld + (1 * wrows * 4 + kid * 132) * sizeof(float));
-            ptx::ld_smem(Breg[0], Breg[1], Breg[2], Breg[3], B_smem_ld + (0 * wcols * 4 + kid * 128) * sizeof(float));
-            ptx::ld_smem(Breg[4], Breg[5], Breg[6], Breg[7], B_smem_ld + (1 * wcols * 4 + kid * 128) * sizeof(float));
+            ptx::lds(Areg[0], Areg[1], Areg[2], Areg[3], A_smem_ld + (0 * wrows * 4 + kid * 132) * sizeof(float));
+            ptx::lds(Areg[4], Areg[5], Areg[6], Areg[7], A_smem_ld + (1 * wrows * 4 + kid * 132) * sizeof(float));
+            ptx::lds(Breg[0], Breg[1], Breg[2], Breg[3], B_smem_ld + (0 * wcols * 4 + kid * 128) * sizeof(float));
+            ptx::lds(Breg[4], Breg[5], Breg[6], Breg[7], B_smem_ld + (1 * wcols * 4 + kid * 128) * sizeof(float));
             #pragma unroll
             for (uint32_t rid = 0; rid < 8; ++rid) {
                 #pragma unroll
@@ -166,10 +166,10 @@ void compute_block_rrr(
             }
         }
         // 将预取数据写入到共享内存
-        ptx::st_smem(Atrans[0], Atrans[1], Atrans[2], Atrans[3], A_smem_st);
+        ptx::sts(Atrans[0], Atrans[1], Atrans[2], Atrans[3], A_smem_st);
         #pragma unroll
         for (uint32_t eid = 0; eid < 4; ++eid) {
-            ptx::st_smem(Btrans[eid], B_smem_st + eid * 32 * sizeof(float));
+            ptx::sts(Btrans[eid], B_smem_st + eid * 32 * sizeof(float));
         }
         __syncthreads();
         // 切换缓冲区
@@ -184,10 +184,10 @@ void compute_block_rrr(
     // 每个线程计算 C 的子区域，采用向量外积方式，在 K_block 维度上循环迭代
     #pragma unroll
     for (uint32_t kid = 0; kid < 8; ++kid) {
-        ptx::ld_smem(Areg[0], Areg[1], Areg[2], Areg[3], A_smem_ld + (0 * wrows * 4 + kid * 132) * sizeof(float));
-        ptx::ld_smem(Areg[4], Areg[5], Areg[6], Areg[7], A_smem_ld + (1 * wrows * 4 + kid * 132) * sizeof(float));
-        ptx::ld_smem(Breg[0], Breg[1], Breg[2], Breg[3], B_smem_ld + (0 * wcols * 4 + kid * 128) * sizeof(float));
-        ptx::ld_smem(Breg[4], Breg[5], Breg[6], Breg[7], B_smem_ld + (1 * wcols * 4 + kid * 128) * sizeof(float));
+        ptx::lds(Areg[0], Areg[1], Areg[2], Areg[3], A_smem_ld + (0 * wrows * 4 + kid * 132) * sizeof(float));
+        ptx::lds(Areg[4], Areg[5], Areg[6], Areg[7], A_smem_ld + (1 * wrows * 4 + kid * 132) * sizeof(float));
+        ptx::lds(Breg[0], Breg[1], Breg[2], Breg[3], B_smem_ld + (0 * wcols * 4 + kid * 128) * sizeof(float));
+        ptx::lds(Breg[4], Breg[5], Breg[6], Breg[7], B_smem_ld + (1 * wcols * 4 + kid * 128) * sizeof(float));
         #pragma unroll
         for (uint32_t rid = 0; rid < 8; ++rid) {
             #pragma unroll
@@ -244,12 +244,12 @@ void compute_block_rcr(
     uint32_t kstart = K - ((K + 7) / 8 - 1) * 8;  // [1, 2, 3, ..., 8]
     #pragma unroll
     for (uint32_t eid = 0; eid < 4; ++eid) {
-        ptx::ld_gmem_zero(Atrans[eid], A_tid + eid * K, (A_valid & (1u << eid)) && (tid % 8 < kstart));
-        ptx::ld_gmem_zero(Btrans[eid], B_tid + eid * K, (B_valid & (1u << eid)) && (tid % 8 < kstart));
+        ptx::ldg_zero(Atrans[eid], A_tid + eid * K, (A_valid & (1u << eid)) && (tid % 8 < kstart));
+        ptx::ldg_zero(Btrans[eid], B_tid + eid * K, (B_valid & (1u << eid)) && (tid % 8 < kstart));
     }
     // 将预取数据写入到共享内存
-    ptx::st_smem(Atrans[0], Atrans[1], Atrans[2], Atrans[3], A_smem_st);
-    ptx::st_smem(Btrans[0], Btrans[1], Btrans[2], Btrans[3], B_smem_st);
+    ptx::sts(Atrans[0], Atrans[1], Atrans[2], Atrans[3], A_smem_st);
+    ptx::sts(Btrans[0], Btrans[1], Btrans[2], Btrans[3], B_smem_st);
     __syncthreads();
     // 切换缓冲区
     A_smem_st ^= 0x2000;
@@ -263,16 +263,16 @@ void compute_block_rcr(
         // 预取 kth 的数据
         #pragma unroll
         for (uint32_t eid = 0; eid < 4; ++eid) {
-            ptx::ld_gmem(Atrans[eid], A_tid + eid * K, A_valid & (1u << eid));
-            ptx::ld_gmem(Btrans[eid], B_tid + eid * K, B_valid & (1u << eid));
+            ptx::ldg(Atrans[eid], A_tid + eid * K, A_valid & (1u << eid));
+            ptx::ldg(Btrans[eid], B_tid + eid * K, B_valid & (1u << eid));
         }
         // 每个线程计算 C 的子区域，采用向量外积方式，在 K_block 维度上循环迭代
         #pragma unroll
         for (uint32_t kid = 0; kid < 8; ++kid) {
-            ptx::ld_smem(Areg[0], Areg[1], Areg[2], Areg[3], A_smem_ld + (0 * wrows * 4 + kid * 132) * sizeof(float));
-            ptx::ld_smem(Areg[4], Areg[5], Areg[6], Areg[7], A_smem_ld + (1 * wrows * 4 + kid * 132) * sizeof(float));
-            ptx::ld_smem(Breg[0], Breg[1], Breg[2], Breg[3], B_smem_ld + (0 * wcols * 4 + kid * 132) * sizeof(float));
-            ptx::ld_smem(Breg[4], Breg[5], Breg[6], Breg[7], B_smem_ld + (1 * wcols * 4 + kid * 132) * sizeof(float));
+            ptx::lds(Areg[0], Areg[1], Areg[2], Areg[3], A_smem_ld + (0 * wrows * 4 + kid * 132) * sizeof(float));
+            ptx::lds(Areg[4], Areg[5], Areg[6], Areg[7], A_smem_ld + (1 * wrows * 4 + kid * 132) * sizeof(float));
+            ptx::lds(Breg[0], Breg[1], Breg[2], Breg[3], B_smem_ld + (0 * wcols * 4 + kid * 132) * sizeof(float));
+            ptx::lds(Breg[4], Breg[5], Breg[6], Breg[7], B_smem_ld + (1 * wcols * 4 + kid * 132) * sizeof(float));
             #pragma unroll
             for (uint32_t rid = 0; rid < 8; ++rid) {
                 #pragma unroll
@@ -282,8 +282,8 @@ void compute_block_rcr(
             }
         }
         // 将预取数据写入到共享内存
-        ptx::st_smem(Atrans[0], Atrans[1], Atrans[2], Atrans[3], A_smem_st);
-        ptx::st_smem(Btrans[0], Btrans[1], Btrans[2], Btrans[3], B_smem_st);
+        ptx::sts(Atrans[0], Atrans[1], Atrans[2], Atrans[3], A_smem_st);
+        ptx::sts(Btrans[0], Btrans[1], Btrans[2], Btrans[3], B_smem_st);
         __syncthreads();
         // 切换缓冲区
         A_smem_st ^= 0x2000;
@@ -297,10 +297,10 @@ void compute_block_rcr(
     // 每个线程计算 C 的子区域，采用向量外积方式，在 K_block 维度上循环迭代
     #pragma unroll
     for (uint32_t kid = 0; kid < 8; ++kid) {
-        ptx::ld_smem(Areg[0], Areg[1], Areg[2], Areg[3], A_smem_ld + (0 * wrows * 4 + kid * 132) * sizeof(float));
-        ptx::ld_smem(Areg[4], Areg[5], Areg[6], Areg[7], A_smem_ld + (1 * wrows * 4 + kid * 132) * sizeof(float));
-        ptx::ld_smem(Breg[0], Breg[1], Breg[2], Breg[3], B_smem_ld + (0 * wcols * 4 + kid * 132) * sizeof(float));
-        ptx::ld_smem(Breg[4], Breg[5], Breg[6], Breg[7], B_smem_ld + (1 * wcols * 4 + kid * 132) * sizeof(float));
+        ptx::lds(Areg[0], Areg[1], Areg[2], Areg[3], A_smem_ld + (0 * wrows * 4 + kid * 132) * sizeof(float));
+        ptx::lds(Areg[4], Areg[5], Areg[6], Areg[7], A_smem_ld + (1 * wrows * 4 + kid * 132) * sizeof(float));
+        ptx::lds(Breg[0], Breg[1], Breg[2], Breg[3], B_smem_ld + (0 * wcols * 4 + kid * 132) * sizeof(float));
+        ptx::lds(Breg[4], Breg[5], Breg[6], Breg[7], B_smem_ld + (1 * wcols * 4 + kid * 132) * sizeof(float));
         #pragma unroll
         for (uint32_t rid = 0; rid < 8; ++rid) {
             #pragma unroll
@@ -357,14 +357,14 @@ void compute_block_crr(
     uint32_t kstart = K - ((K + 7) / 8 - 1) * 8;  // [1, 2, 3, ..., 8]
     #pragma unroll
     for (uint32_t eid = 0; eid < 4; ++eid) {
-        ptx::ld_gmem_zero(Atrans[eid], A_tid + eid * 32, (A_valid & (1u << eid)) && (wid < kstart));
-        ptx::ld_gmem_zero(Btrans[eid], B_tid + eid * 32, (B_valid & (1u << eid)) && (wid < kstart));
+        ptx::ldg_zero(Atrans[eid], A_tid + eid * 32, (A_valid & (1u << eid)) && (wid < kstart));
+        ptx::ldg_zero(Btrans[eid], B_tid + eid * 32, (B_valid & (1u << eid)) && (wid < kstart));
     }
     // 将预取数据写入到共享内存
     #pragma unroll
     for (uint32_t eid = 0; eid < 4; ++eid) {
-        ptx::st_smem(Atrans[eid], A_smem_st + eid * 32 * sizeof(float));
-        ptx::st_smem(Btrans[eid], B_smem_st + eid * 32 * sizeof(float));
+        ptx::sts(Atrans[eid], A_smem_st + eid * 32 * sizeof(float));
+        ptx::sts(Btrans[eid], B_smem_st + eid * 32 * sizeof(float));
     }
     __syncthreads();
     // 切换缓冲区
@@ -379,16 +379,16 @@ void compute_block_crr(
         // 预取 kth 的数据
         #pragma unroll
         for (uint32_t eid = 0; eid < 4; ++eid) {
-            ptx::ld_gmem(Atrans[eid], A_tid + eid * 32, A_valid & (1u << eid));
-            ptx::ld_gmem(Btrans[eid], B_tid + eid * 32, B_valid & (1u << eid));
+            ptx::ldg(Atrans[eid], A_tid + eid * 32, A_valid & (1u << eid));
+            ptx::ldg(Btrans[eid], B_tid + eid * 32, B_valid & (1u << eid));
         }
         // 每个线程计算 C 的子区域，采用向量外积方式，在 K_block 维度上循环迭代
         #pragma unroll
         for (uint32_t kid = 0; kid < 8; ++kid) {
-            ptx::ld_smem(Areg[0], Areg[1], Areg[2], Areg[3], A_smem_ld + (0 * wrows * 4 + kid * 128) * sizeof(float));
-            ptx::ld_smem(Areg[4], Areg[5], Areg[6], Areg[7], A_smem_ld + (1 * wrows * 4 + kid * 128) * sizeof(float));
-            ptx::ld_smem(Breg[0], Breg[1], Breg[2], Breg[3], B_smem_ld + (0 * wcols * 4 + kid * 128) * sizeof(float));
-            ptx::ld_smem(Breg[4], Breg[5], Breg[6], Breg[7], B_smem_ld + (1 * wcols * 4 + kid * 128) * sizeof(float));
+            ptx::lds(Areg[0], Areg[1], Areg[2], Areg[3], A_smem_ld + (0 * wrows * 4 + kid * 128) * sizeof(float));
+            ptx::lds(Areg[4], Areg[5], Areg[6], Areg[7], A_smem_ld + (1 * wrows * 4 + kid * 128) * sizeof(float));
+            ptx::lds(Breg[0], Breg[1], Breg[2], Breg[3], B_smem_ld + (0 * wcols * 4 + kid * 128) * sizeof(float));
+            ptx::lds(Breg[4], Breg[5], Breg[6], Breg[7], B_smem_ld + (1 * wcols * 4 + kid * 128) * sizeof(float));
             #pragma unroll
             for (uint32_t rid = 0; rid < 8; ++rid) {
                 #pragma unroll
@@ -400,8 +400,8 @@ void compute_block_crr(
         // 将预取数据写入到共享内存
         #pragma unroll
         for (uint32_t eid = 0; eid < 4; ++eid) {
-            ptx::st_smem(Atrans[eid], A_smem_st + eid * 32 * sizeof(float));
-            ptx::st_smem(Btrans[eid], B_smem_st + eid * 32 * sizeof(float));
+            ptx::sts(Atrans[eid], A_smem_st + eid * 32 * sizeof(float));
+            ptx::sts(Btrans[eid], B_smem_st + eid * 32 * sizeof(float));
         }
         __syncthreads();
         // 切换缓冲区
@@ -416,10 +416,10 @@ void compute_block_crr(
     // 每个线程计算 C 的子区域，采用向量外积方式，在 K_block 维度上循环迭代
     #pragma unroll
     for (uint32_t kid = 0; kid < 8; ++kid) {
-        ptx::ld_smem(Areg[0], Areg[1], Areg[2], Areg[3], A_smem_ld + (0 * wrows * 4 + kid * 128) * sizeof(float));
-        ptx::ld_smem(Areg[4], Areg[5], Areg[6], Areg[7], A_smem_ld + (1 * wrows * 4 + kid * 128) * sizeof(float));
-        ptx::ld_smem(Breg[0], Breg[1], Breg[2], Breg[3], B_smem_ld + (0 * wcols * 4 + kid * 128) * sizeof(float));
-        ptx::ld_smem(Breg[4], Breg[5], Breg[6], Breg[7], B_smem_ld + (1 * wcols * 4 + kid * 128) * sizeof(float));
+        ptx::lds(Areg[0], Areg[1], Areg[2], Areg[3], A_smem_ld + (0 * wrows * 4 + kid * 128) * sizeof(float));
+        ptx::lds(Areg[4], Areg[5], Areg[6], Areg[7], A_smem_ld + (1 * wrows * 4 + kid * 128) * sizeof(float));
+        ptx::lds(Breg[0], Breg[1], Breg[2], Breg[3], B_smem_ld + (0 * wcols * 4 + kid * 128) * sizeof(float));
+        ptx::lds(Breg[4], Breg[5], Breg[6], Breg[7], B_smem_ld + (1 * wcols * 4 + kid * 128) * sizeof(float));
         #pragma unroll
         for (uint32_t rid = 0; rid < 8; ++rid) {
             #pragma unroll
@@ -476,15 +476,15 @@ void compute_block_ccr(
     uint32_t kstart = K - ((K + 7) / 8 - 1) * 8;  // [1, 2, 3, ..., 8]
     #pragma unroll
     for (uint32_t eid = 0; eid < 4; ++eid) {
-        ptx::ld_gmem_zero(Atrans[eid], A_tid + eid * 32, (A_valid & (1u << eid)) && (wid < kstart));
-        ptx::ld_gmem_zero(Btrans[eid], B_tid + eid * K, (B_valid & (1u << eid)) && (tid % 8 < kstart));
+        ptx::ldg_zero(Atrans[eid], A_tid + eid * 32, (A_valid & (1u << eid)) && (wid < kstart));
+        ptx::ldg_zero(Btrans[eid], B_tid + eid * K, (B_valid & (1u << eid)) && (tid % 8 < kstart));
     }
     // 将预取数据写入到共享内存
     #pragma unroll
     for (uint32_t eid = 0; eid < 4; ++eid) {
-        ptx::st_smem(Atrans[eid], A_smem_st + eid * 32 * sizeof(float));
+        ptx::sts(Atrans[eid], A_smem_st + eid * 32 * sizeof(float));
     }
-    ptx::st_smem(Btrans[0], Btrans[1], Btrans[2], Btrans[3], B_smem_st);
+    ptx::sts(Btrans[0], Btrans[1], Btrans[2], Btrans[3], B_smem_st);
     __syncthreads();
     // 切换缓冲区
     A_smem_st ^= 0x1000;
@@ -498,16 +498,16 @@ void compute_block_ccr(
         // 预取 kth 的数据
         #pragma unroll
         for (uint32_t eid = 0; eid < 4; ++eid) {
-            ptx::ld_gmem(Atrans[eid], A_tid + eid * 32, A_valid & (1u << eid));
-            ptx::ld_gmem(Btrans[eid], B_tid + eid * K, B_valid & (1u << eid));
+            ptx::ldg(Atrans[eid], A_tid + eid * 32, A_valid & (1u << eid));
+            ptx::ldg(Btrans[eid], B_tid + eid * K, B_valid & (1u << eid));
         }
         // 每个线程计算 C 的子区域，采用向量外积方式，在 K_block 维度上循环迭代
         #pragma unroll
         for (uint32_t kid = 0; kid < 8; ++kid) {
-            ptx::ld_smem(Areg[0], Areg[1], Areg[2], Areg[3], A_smem_ld + (0 * wrows * 4 + kid * 128) * sizeof(float));
-            ptx::ld_smem(Areg[4], Areg[5], Areg[6], Areg[7], A_smem_ld + (1 * wrows * 4 + kid * 128) * sizeof(float));
-            ptx::ld_smem(Breg[0], Breg[1], Breg[2], Breg[3], B_smem_ld + (0 * wcols * 4 + kid * 132) * sizeof(float));
-            ptx::ld_smem(Breg[4], Breg[5], Breg[6], Breg[7], B_smem_ld + (1 * wcols * 4 + kid * 132) * sizeof(float));
+            ptx::lds(Areg[0], Areg[1], Areg[2], Areg[3], A_smem_ld + (0 * wrows * 4 + kid * 128) * sizeof(float));
+            ptx::lds(Areg[4], Areg[5], Areg[6], Areg[7], A_smem_ld + (1 * wrows * 4 + kid * 128) * sizeof(float));
+            ptx::lds(Breg[0], Breg[1], Breg[2], Breg[3], B_smem_ld + (0 * wcols * 4 + kid * 132) * sizeof(float));
+            ptx::lds(Breg[4], Breg[5], Breg[6], Breg[7], B_smem_ld + (1 * wcols * 4 + kid * 132) * sizeof(float));
             #pragma unroll
             for (uint32_t rid = 0; rid < 8; ++rid) {
                 #pragma unroll
@@ -519,9 +519,9 @@ void compute_block_ccr(
         // 将预取数据写入到共享内存
         #pragma unroll
         for (uint32_t eid = 0; eid < 4; ++eid) {
-            ptx::st_smem(Atrans[eid], A_smem_st + eid * 32 * sizeof(float));
+            ptx::sts(Atrans[eid], A_smem_st + eid * 32 * sizeof(float));
         }
-        ptx::st_smem(Btrans[0], Btrans[1], Btrans[2], Btrans[3], B_smem_st);
+        ptx::sts(Btrans[0], Btrans[1], Btrans[2], Btrans[3], B_smem_st);
         __syncthreads();
         // 切换缓冲区
         A_smem_st ^= 0x1000;
@@ -535,10 +535,10 @@ void compute_block_ccr(
     // 每个线程计算 C 的子区域，采用向量外积方式，在 K_block 维度上循环迭代
     #pragma unroll
     for (uint32_t kid = 0; kid < 8; ++kid) {
-        ptx::ld_smem(Areg[0], Areg[1], Areg[2], Areg[3], A_smem_ld + (0 * wrows * 4 + kid * 128) * sizeof(float));
-        ptx::ld_smem(Areg[4], Areg[5], Areg[6], Areg[7], A_smem_ld + (1 * wrows * 4 + kid * 128) * sizeof(float));
-        ptx::ld_smem(Breg[0], Breg[1], Breg[2], Breg[3], B_smem_ld + (0 * wcols * 4 + kid * 132) * sizeof(float));
-        ptx::ld_smem(Breg[4], Breg[5], Breg[6], Breg[7], B_smem_ld + (1 * wcols * 4 + kid * 132) * sizeof(float));
+        ptx::lds(Areg[0], Areg[1], Areg[2], Areg[3], A_smem_ld + (0 * wrows * 4 + kid * 128) * sizeof(float));
+        ptx::lds(Areg[4], Areg[5], Areg[6], Areg[7], A_smem_ld + (1 * wrows * 4 + kid * 128) * sizeof(float));
+        ptx::lds(Breg[0], Breg[1], Breg[2], Breg[3], B_smem_ld + (0 * wcols * 4 + kid * 132) * sizeof(float));
+        ptx::lds(Breg[4], Breg[5], Breg[6], Breg[7], B_smem_ld + (1 * wcols * 4 + kid * 132) * sizeof(float));
         #pragma unroll
         for (uint32_t rid = 0; rid < 8; ++rid) {
             #pragma unroll

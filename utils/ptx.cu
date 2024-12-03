@@ -20,7 +20,7 @@ uint32_t smem_addr(const void *ptr) {
     return addr;
 }
 __device__ __forceinline__
-void st_smem(const float &reg, const uint32_t &addr) {
+void sts(const float &reg, const uint32_t &addr) {
     /* 向共享内存 addr 中写入 1 个 float 数据 */
     asm volatile (
         "st.shared.f32 [%1], %0;\n"
@@ -28,7 +28,7 @@ void st_smem(const float &reg, const uint32_t &addr) {
     );
 }
 __device__ __forceinline__
-void st_smem(const float &r0, const float &r1, const float &r2, const float &r3, const uint32_t &addr) {
+void sts(const float &r0, const float &r1, const float &r2, const float &r3, const uint32_t &addr) {
     /* 向共享内存 addr 中写入 4 个 float 数据 */
     asm volatile (
         "st.shared.v4.f32 [%4], {%0, %1, %2, %3};\n"
@@ -36,7 +36,7 @@ void st_smem(const float &r0, const float &r1, const float &r2, const float &r3,
     );
 }
 __device__ __forceinline__
-void ld_smem(float &reg, const uint32_t &addr) {
+void lds(float &reg, const uint32_t &addr) {
     /* 从共享内存 addr 中读取 1 个 float 数据 */
     asm volatile (
         "ld.shared.f32 %0, [%1];\n"
@@ -45,7 +45,7 @@ void ld_smem(float &reg, const uint32_t &addr) {
     );
 }
 __device__ __forceinline__
-void ld_smem(float &r0, float &r1, float &r2, float &r3, const uint32_t &addr) {
+void lds(float &r0, float &r1, float &r2, float &r3, const uint32_t &addr) {
     /* 从共享内存 addr 中读取 4 个 float 数据 */
     asm volatile (
         "ld.shared.v4.f32 {%0, %1, %2, %3}, [%4];\n"
@@ -54,7 +54,7 @@ void ld_smem(float &r0, float &r1, float &r2, float &r3, const uint32_t &addr) {
     );
 }
 __device__ __forceinline__
-void ld_gmem(float &reg, const void *ptr, bool guard) {
+void ldg(float &reg, const void *ptr, bool guard) {
     /* 当 guard 为 true 时，从全局内存 ptr 中读取 1 个 float 数据 */
     #if (__CUDACC_VER_MAJOR__ >= 11 && __CUDACC_VER_MINOR__ >= 4 && __CUDA_ARCH__ >= 750)
     asm volatile (
@@ -79,7 +79,7 @@ void ld_gmem(float &reg, const void *ptr, bool guard) {
     #endif
 }
 __device__ __forceinline__
-void ld_gmem_zero(float &reg, const void *ptr, bool guard) {
+void ldg_zero(float &reg, const void *ptr, bool guard) {
     /* 当 guard 为 true 时，从全局内存 ptr 中读取 1 个 float 数据，否则置零 */
     #if (__CUDACC_VER_MAJOR__ >= 11 && __CUDACC_VER_MINOR__ >= 4 && __CUDA_ARCH__ >= 750)
     asm volatile (
@@ -106,7 +106,7 @@ void ld_gmem_zero(float &reg, const void *ptr, bool guard) {
     #endif
 }
 __device__ __forceinline__
-void st_gmem(const float &reg, void *ptr, bool guard) {
+void stg(const float &reg, void *ptr, bool guard) {
     /* 当 guard 为 true 时，向全局内存 ptr 中写入 1 个 float 数据 */
     asm volatile (
         "{\n"

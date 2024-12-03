@@ -31,17 +31,25 @@ void sgemm_rrr_128x128x8_kernel(
     // A, B Thread Tile on register, C Thread Tile on register (double buffer)
     float A_frag[2][8], B_frag[2][8], C_frag[8][8] = { 0 };
 
-    // 一个Warp中的线程标识，排列成 4x8 形状
-    const uint32_t warp_id = threadIdx.x / 32;
-    const uint32_t lane_id = threadIdx.x % 32;
-    const uint32_t lane_rid = (lane_id / 16) * 2 + (lane_id % 2);
-    const uint32_t lane_cid = (lane_id / 2) % 8;
-
     // A_tile and B_tile ldg pointer, Threadblock arranged as row-major
     // [NEXT] = A_ldg_ptr + K_tile;      [eid] = A_ldg_ptr + eid * K;
     // [NEXT] = B_ldg_ptr + K_tile * N;  [eid] = B_ldg_ptr + eid * 32;
     const float *A_ldg_ptr = reinterpret_cast<const float*>(A + blockIdx.y * 128 * K + threadIdx.x / 8 * 4 * K + threadIdx.x % 8);
     const float *B_ldg_ptr = reinterpret_cast<const float*>(B + blockIdx.x * 128 + threadIdx.x / 32 * N + threadIdx.x % 32);
+
+    // ldg_valid[eid] 标识 eid 数据是否为有效数据，有效元素指未越界的数据，避免 ldg 指令越界
+    uint32_t A_ldg_valid = 0, B_ldg_valid = 0;
+    #pragma unroll
+    for (uint32_t eid = 0; eid < 4; ++eid) {
+        A_ldg_valid |= (uint32_t)(blockIdx.y * 128 + threadIdx.x / 8 * 4 + eid < M)   << eid;
+        B_ldg_valid |= (uint32_t)(blockIdx.x * 128 + threadIdx.x % 32 + eid * 32 < N) << eid;
+    }
+
+    // 一个Warp中的线程标识，排列成 4x8 形状
+    const uint32_t warp_id = threadIdx.x / 32;
+    const uint32_t lane_id = threadIdx.x % 32;
+    const uint32_t lane_rid = (lane_id / 16) * 2 + (lane_id % 2);
+    const uint32_t lane_cid = (lane_id / 2) % 8;
 
     // A_tile and B_tile sts address
     // [eid] = A_sts_addr + eid * sizeof(float)
@@ -55,14 +63,6 @@ void sgemm_rrr_128x128x8_kernel(
     uint32_t A_lds_addr = ptx::smem_addr(A_smem + warp_id / 2 * 32 + lane_rid * 4);
     uint32_t B_lds_addr = ptx::smem_addr(B_smem + warp_id % 2 * 64 + lane_cid * 4);
 
-    // ldg_valid[eid] 标识 eid 数据是否为有效数据，有效元素指未越界的数据，避免 ldg 指令越界
-    uint32_t A_ldg_valid = 0, B_ldg_valid = 0;
-    #pragma unroll
-    for (uint32_t eid = 0; eid < 4; ++eid) {
-        A_ldg_valid |= (uint32_t)(blockIdx.y * 128 + threadIdx.x / 8 * 4 + eid < M)   << eid;
-        B_ldg_valid |= (uint32_t)(blockIdx.x * 128 + threadIdx.x % 32 + eid * 32 < N) << eid;
-    }
-
     // A, B ldg buffer for transfering data from gmem to smem
     float A_ldg_buf[4], B_ldg_buf[4];
 
@@ -71,16 +71,16 @@ void sgemm_rrr_128x128x8_kernel(
         uint32_t first_k_tile = K - ((K + 7) / 8 - 1) * 8;
         #pragma unroll
         for (uint32_t eid = 0; eid < 4; ++eid) {
-            ptx::ld_gmem_zero(A_ldg_buf[eid], A_ldg_ptr + eid * K, (A_ldg_valid & (1u << eid)) && threadIdx.x % 8 < first_k_tile);
+            ptx::ldg_zero(A_ldg_buf[eid], A_ldg_ptr + eid * K, (A_ldg_valid & (1u << eid)) && threadIdx.x % 8 < first_k_tile);
         }
-        ptx::st_smem(A_ldg_buf[0], A_ldg_buf[1], A_ldg_buf[2], A_ldg_buf[3], A_sts_addr);
+        ptx::sts(A_ldg_buf[0], A_ldg_buf[1], A_ldg_buf[2], A_ldg_buf[3], A_sts_addr);
         #pragma unroll
         for (uint32_t eid = 0; eid < 4; ++eid) {
-            ptx::ld_gmem_zero(B_ldg_buf[eid], B_ldg_ptr + eid * 32, (B_ldg_valid & (1u << eid)) && threadIdx.x / 32 < first_k_tile);
+            ptx::ldg_zero(B_ldg_buf[eid], B_ldg_ptr + eid * 32, (B_ldg_valid & (1u << eid)) && threadIdx.x / 32 < first_k_tile);
         }
         #pragma unroll
         for (uint32_t eid = 0; eid < 4; ++eid) {
-            ptx::st_smem(B_ldg_buf[eid], B_sts_addr + eid * 32 * sizeof(float));
+            ptx::sts(B_ldg_buf[eid], B_sts_addr + eid * 32 * sizeof(float));
         }
         __syncthreads();
         // switch double buffer
@@ -92,10 +92,10 @@ void sgemm_rrr_128x128x8_kernel(
     }
 
     // load the first fragment
-    ptx::ld_smem(A_frag[0][0], A_frag[0][1], A_frag[0][2], A_frag[0][3], A_lds_addr);
-    ptx::ld_smem(A_frag[0][4], A_frag[0][5], A_frag[0][6], A_frag[0][7], A_lds_addr + 16 * sizeof(float));
-    ptx::ld_smem(B_frag[0][0], B_frag[0][1], B_frag[0][2], B_frag[0][3], B_lds_addr);
-    ptx::ld_smem(B_frag[0][4], B_frag[0][5], B_frag[0][6], B_frag[0][7], B_lds_addr + 32 * sizeof(float));
+    ptx::lds(A_frag[0][0], A_frag[0][1], A_frag[0][2], A_frag[0][3], A_lds_addr);
+    ptx::lds(A_frag[0][4], A_frag[0][5], A_frag[0][6], A_frag[0][7], A_lds_addr + 16 * sizeof(float));
+    ptx::lds(B_frag[0][0], B_frag[0][1], B_frag[0][2], B_frag[0][3], B_lds_addr);
+    ptx::lds(B_frag[0][4], B_frag[0][5], B_frag[0][6], B_frag[0][7], B_lds_addr + 32 * sizeof(float));
 
     // K-Loop, and K_tile is 8
     for (uint32_t num_k_tiles = (K + 7) / 8 - 1; num_k_tiles > 0; --num_k_tiles) {
@@ -103,10 +103,10 @@ void sgemm_rrr_128x128x8_kernel(
         for (int k_frag = 0; k_frag < 8; ++k_frag) {
             // K_tile 次计算即将执行完毕，将下一个 A_tile 和 B_tile 写入共享内存
             if (k_frag == 7) {
-                ptx::st_smem(A_ldg_buf[0], A_ldg_buf[1], A_ldg_buf[2], A_ldg_buf[3], A_sts_addr);
+                ptx::sts(A_ldg_buf[0], A_ldg_buf[1], A_ldg_buf[2], A_ldg_buf[3], A_sts_addr);
                 #pragma unroll
                 for (uint32_t eid = 0; eid < 4; ++eid) {
-                    ptx::st_smem(B_ldg_buf[eid], B_sts_addr + eid * 32 * sizeof(float));
+                    ptx::sts(B_ldg_buf[eid], B_sts_addr + eid * 32 * sizeof(float));
                 }
                 __syncthreads();
                 // switch double buffer
@@ -119,22 +119,22 @@ void sgemm_rrr_128x128x8_kernel(
                 B_ldg_ptr += 8 * N;
             }
             // 读取下一次计算所需的 A_frag 和 B_frag 并写入寄存器
-            ptx::ld_smem(
+            ptx::lds(
                 A_frag[(k_frag + 1) % 2][0], A_frag[(k_frag + 1) % 2][1],
                 A_frag[(k_frag + 1) % 2][2], A_frag[(k_frag + 1) % 2][3],
                 A_lds_addr + (k_frag + 1) % 8 * 132 * sizeof(float)
             );
-            ptx::ld_smem(
+            ptx::lds(
                 A_frag[(k_frag + 1) % 2][4], A_frag[(k_frag + 1) % 2][5],
                 A_frag[(k_frag + 1) % 2][6], A_frag[(k_frag + 1) % 2][7],
                 A_lds_addr + ((k_frag + 1) % 8 * 132 + 16) * sizeof(float)
             );
-            ptx::ld_smem(
+            ptx::lds(
                 B_frag[(k_frag + 1) % 2][0], B_frag[(k_frag + 1) % 2][1],
                 B_frag[(k_frag + 1) % 2][2], B_frag[(k_frag + 1) % 2][3],
                 B_lds_addr + (k_frag + 1) % 8 * 128 * sizeof(float)
             );
-            ptx::ld_smem(
+            ptx::lds(
                 B_frag[(k_frag + 1) % 2][4], B_frag[(k_frag + 1) % 2][5],
                 B_frag[(k_frag + 1) % 2][6], B_frag[(k_frag + 1) % 2][7],
                 B_lds_addr + ((k_frag + 1) % 8 * 128 + 32) * sizeof(float)
@@ -143,11 +143,11 @@ void sgemm_rrr_128x128x8_kernel(
             if (k_frag == 0) {
                 #pragma unroll
                 for (uint32_t eid = 0; eid < 4; ++eid) {
-                    ptx::ld_gmem_zero(A_ldg_buf[eid], A_ldg_ptr + eid * K, A_ldg_valid & (1u << eid));
+                    ptx::ldg_zero(A_ldg_buf[eid], A_ldg_ptr + eid * K, A_ldg_valid & (1u << eid));
                 }
                 #pragma unroll
                 for (uint32_t eid = 0; eid < 4; ++eid) {
-                    ptx::ld_gmem_zero(B_ldg_buf[eid], B_ldg_ptr + eid * 32, B_ldg_valid & (1u << eid));
+                    ptx::ldg_zero(B_ldg_buf[eid], B_ldg_ptr + eid * 32, B_ldg_valid & (1u << eid));
                 }
             }
             // 执行FFMA计算
@@ -165,22 +165,22 @@ void sgemm_rrr_128x128x8_kernel(
     for (int k_frag = 0; k_frag < 8; ++k_frag) {
         // 读取下一次计算所需的 A_frag 和 B_frag 并写入寄存器
         if (k_frag < 7) {
-            ptx::ld_smem(
+            ptx::lds(
                 A_frag[(k_frag + 1) % 2][0], A_frag[(k_frag + 1) % 2][1],
                 A_frag[(k_frag + 1) % 2][2], A_frag[(k_frag + 1) % 2][3],
                 A_lds_addr + (k_frag + 1) % 8 * 132 * sizeof(float)
             );
-            ptx::ld_smem(
+            ptx::lds(
                 A_frag[(k_frag + 1) % 2][4], A_frag[(k_frag + 1) % 2][5],
                 A_frag[(k_frag + 1) % 2][6], A_frag[(k_frag + 1) % 2][7],
                 A_lds_addr + ((k_frag + 1) % 8 * 132 + 16) * sizeof(float)
             );
-            ptx::ld_smem(
+            ptx::lds(
                 B_frag[(k_frag + 1) % 2][0], B_frag[(k_frag + 1) % 2][1],
                 B_frag[(k_frag + 1) % 2][2], B_frag[(k_frag + 1) % 2][3],
                 B_lds_addr + (k_frag + 1) % 8 * 128 * sizeof(float)
             );
-            ptx::ld_smem(
+            ptx::lds(
                 B_frag[(k_frag + 1) % 2][4], B_frag[(k_frag + 1) % 2][5],
                 B_frag[(k_frag + 1) % 2][6], B_frag[(k_frag + 1) % 2][7],
                 B_lds_addr + ((k_frag + 1) % 8 * 128 + 32) * sizeof(float)
@@ -213,7 +213,7 @@ void sgemm_rrr_128x128x8_kernel(
             __syncthreads();
             #pragma unroll
             for (uint32_t trid = 0; trid < 4; ++trid) {
-                ptx::st_smem(
+                ptx::sts(
                     C_frag[prid * 4 + trid][pcid * 4 + 0], C_frag[prid * 4 + trid][pcid * 4 + 1],
                     C_frag[prid * 4 + trid][pcid * 4 + 2], C_frag[prid * 4 + trid][pcid * 4 + 3],
                     C_sts_addr + trid * 32 * sizeof(float)
@@ -222,7 +222,7 @@ void sgemm_rrr_128x128x8_kernel(
             __syncthreads();
             #pragma unroll
             for (uint32_t iter = 0; iter < 16; ++iter) {
-                ptx::st_gmem(
+                ptx::stg(
                     C_lds_ptr[iter * 32], C_stg_ptr + prid * 16 * N + pcid * 32 + iter * N,
                     (m_idx + prid * 16 + iter < M) && (n_idx + pcid * 32 < N)
                 );
@@ -246,15 +246,15 @@ void store_result_smem_rr(
     for (uint32_t r = 0; r < 4; ++r) {
         __syncthreads();
         // 将数据写入到共享内存
-        ptx::st_smem(Creg[r][0], Creg[r][1], Creg[r][2], Creg[r][3], C_smem_st + (0 * wrows * 128 + 0 * wcols * 4) * sizeof(float));
-        ptx::st_smem(Creg[r][4], Creg[r][5], Creg[r][6], Creg[r][7], C_smem_st + (0 * wrows * 128 + 1 * wcols * 4) * sizeof(float));
-        ptx::st_smem(Creg[r+4][0], Creg[r+4][1], Creg[r+4][2], Creg[r+4][3], C_smem_st + (1 * wrows * 128 + 0 * wcols * 4) * sizeof(float));
-        ptx::st_smem(Creg[r+4][4], Creg[r+4][5], Creg[r+4][6], Creg[r+4][7], C_smem_st + (1 * wrows * 128 + 1 * wcols * 4) * sizeof(float));
+        ptx::sts(Creg[r][0], Creg[r][1], Creg[r][2], Creg[r][3], C_smem_st + (0 * wrows * 128 + 0 * wcols * 4) * sizeof(float));
+        ptx::sts(Creg[r][4], Creg[r][5], Creg[r][6], Creg[r][7], C_smem_st + (0 * wrows * 128 + 1 * wcols * 4) * sizeof(float));
+        ptx::sts(Creg[r+4][0], Creg[r+4][1], Creg[r+4][2], Creg[r+4][3], C_smem_st + (1 * wrows * 128 + 0 * wcols * 4) * sizeof(float));
+        ptx::sts(Creg[r+4][4], Creg[r+4][5], Creg[r+4][6], Creg[r+4][7], C_smem_st + (1 * wrows * 128 + 1 * wcols * 4) * sizeof(float));
         __syncthreads();
         // 使用 2x128 排列的线程搬运 32x128 共享内存（需 16 次），每次每线程写回 1 个数据
         #pragma unroll
         for (uint32_t gmem_row = r; gmem_row < 128; gmem_row += 4 * 2) {
-            ptx::st_gmem(
+            ptx::stg(
                 *reinterpret_cast<float*>(smem_buf + gmem_row / 4 * 128 + tid),
                 C_block + (gmem_row + tid / 128 * 4) * N + (tid % 128),
                 (brid * 128 + gmem_row + tid / 128 * 4 < M) && (bcid * 128 + tid % 128 < N)

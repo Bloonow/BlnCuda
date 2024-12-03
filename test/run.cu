@@ -14,7 +14,7 @@ int main(int argc, char *argv[]) {
     const int batchCount = 1;
     const int M = 5120;
     const int N = 4096;
-    const int K = 4096;
+    const int K = 2048;
     const int aS = M * K, bS = K * N, cS = M * N;
 
     float *A, *B, *C0_ROW, *C0_COL, *C1, *C2, *C3;
@@ -27,7 +27,7 @@ int main(int argc, char *argv[]) {
     matrix_init(&C3, M, N, batchCount, 0.f);
 
     // 是否测试正确性
-    // #define TEST_ERROR 1.e-5
+    #define TEST_ERROR 1.e-5
 
     cublasLt_sgemm(A, B, C0_ROW, alpha, beta, M, N, K, batchCount, CUBLASLT_ORDER_ROW, CUBLASLT_ORDER_ROW, CUBLASLT_ORDER_ROW);
     cublasLt_sgemm(A, B, C0_COL, alpha, beta, M, N, K, batchCount, CUBLASLT_ORDER_ROW, CUBLASLT_ORDER_ROW, CUBLASLT_ORDER_COL);
