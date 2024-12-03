@@ -26,7 +26,7 @@ void sgemm_rrr_128x128x8_kernel(
     // A_tile 需要一块连续的 8 KiB * 2 = 2^13 B * 2 的缓冲区，故可以使用 (uint32_t&) A_smem ^= 0x2000; 进行切换
     // B_tile 需要一块连续的 4 KiB * 2 = 2^12 B * 2 的缓冲区，故可以使用 (uint32_t&) B_smem ^= 0x1000; 进行切换
     // 如此，共享内存双缓冲的切换，只需要使用一条异或指令即可
-    float *smem_buf = buffer::SharedMemory<float, 128 * 8 * 6>().pointer();
+    float *smem_buf = buffer::SharedMemory<float, 128 * 8 * 4 + 128 * 8 * 2>().pointer();
     float *A_smem = reinterpret_cast<float*>(smem_buf);
     float *B_smem = reinterpret_cast<float*>(smem_buf + 128 * 8 * 4);
 
@@ -54,14 +54,14 @@ void sgemm_rrr_128x128x8_kernel(
     const uint32_t lane_cid = (lane_id / 2) % 8;
 
     // A_tile and B_tile sts address
-    // [eid] = A_sts_addr + eid * sizeof(float)
-    // [eid] = B_sts_addr + eid * 32 * sizeof(float)
+    // [eid] = A_sts_addr + eid * sizeof(float);
+    // [eid] = B_sts_addr + eid * 32 * sizeof(float);
     uint32_t A_sts_addr = ptx::smem_addr(A_smem + threadIdx.x % 8 * 132 + threadIdx.x / 8 * 4);
     uint32_t B_sts_addr = ptx::smem_addr(B_smem + threadIdx.x / 32 * 128 + threadIdx.x % 32);
 
-    // A_tile and B_tile lds address, four sub-partitions: [0][0], [0][1], [1][0], [1][1]
-    // [eid] = A_lds_addr + eid * 132 * sizeof(float);  [prid][pcid] = A_lds_addr + prid * 4 * 4 * sizeof(float)
-    // [eid] = B_lds_addr + eid * 128 * sizeof(float);  [prid][pcid] = B_lds_addr + pcid * 8 * 4 * sizeof(float)
+    // A_tile and B_tile lds address, 2x2 sub-partitions = [0][0], [0][1], [1][0], [1][1]
+    // [eid] = A_lds_addr + eid * 132 * sizeof(float);  [prid][pcid] = A_lds_addr + prid * 4 * 4 * sizeof(float);
+    // [eid] = B_lds_addr + eid * 128 * sizeof(float);  [prid][pcid] = B_lds_addr + pcid * 8 * 4 * sizeof(float);
     uint32_t A_lds_addr = ptx::smem_addr(A_smem + warp_id / 2 * 32 + lane_rid * 4);
     uint32_t B_lds_addr = ptx::smem_addr(B_smem + warp_id % 2 * 64 + lane_cid * 4);
 
@@ -73,12 +73,12 @@ void sgemm_rrr_128x128x8_kernel(
         uint32_t first_k_tile = K - ((K + 7) / 8 - 1) * 8;
         #pragma unroll
         for (uint32_t eid = 0; eid < 4; ++eid) {
-            ptx::ldg_zero(A_ldg_buf[eid], A_ldg_ptr + eid * K, (A_ldg_valid & (1u << eid)) && threadIdx.x % 8 < first_k_tile);
+            ptx::ldg_zero(A_ldg_buf[eid], A_ldg_ptr + eid * K, (A_ldg_valid & (1u << eid)) && (threadIdx.x % 8 < first_k_tile));
         }
         ptx::sts(A_ldg_buf[0], A_ldg_buf[1], A_ldg_buf[2], A_ldg_buf[3], A_sts_addr);
         #pragma unroll
         for (uint32_t eid = 0; eid < 4; ++eid) {
-            ptx::ldg_zero(B_ldg_buf[eid], B_ldg_ptr + eid * 32, (B_ldg_valid & (1u << eid)) && threadIdx.x / 32 < first_k_tile);
+            ptx::ldg_zero(B_ldg_buf[eid], B_ldg_ptr + eid * 32, (B_ldg_valid & (1u << eid)) && (threadIdx.x / 32 < first_k_tile));
         }
         #pragma unroll
         for (uint32_t eid = 0; eid < 4; ++eid) {
@@ -206,15 +206,15 @@ void sgemm_rrr_128x128x8_kernel(
         }
     }
 
-    // 重用 128 * 48 * float 共享内存空间，行主序写回矩阵 C，每次写回一个分区的 16 * 32 * 8 = 128 * 32 * float 数据
-    // [trid] = C_sts_addr + trid * 32 * sizeof(float);  trid = 0, 1, 2, 3, for 4x4 Thread Tile
+    // 重用 128 * 48 * float 共享内存空间，行主序写回矩阵 C，每次写回一个分区的 16 * 32 * 8 Warp = 128 * 32 * float 数据
+    // [trid] = C_sts_addr + trid * 32 * sizeof(float); for 4x4 Thread Tile, trid = 0, 1, 2, 3
     uint32_t C_sts_addr = ptx::smem_addr(smem_buf + warp_id * 16 * 32 + lane_rid * 4 * 32 + lane_cid * 4);
-    // [iter] = C_lds_ptr + iter * 32;  iter = 0, 1, 2, ..., 15, for 16x32 Warp Tile
+    // [iter] = C_lds_ptr + iter * 32; for 16x32 Warp Tile, iter = 0, 1, 2, ..., 15
     const float *C_lds_ptr = reinterpret_cast<const float*>(smem_buf + warp_id * 16 * 32 + lane_id);
     // 将矩阵 C 写回设备内存时的，每个线程对应数据的偏移
     uint32_t m_idx = blockIdx.y * 128 + warp_id / 2 * 32;
     uint32_t n_idx = blockIdx.x * 128 + warp_id % 2 * 64 + lane_id;
-    // [prid][pcid][iter] = C_stg_ptr + prid * 16 * N + pcid * 32 + iter * N
+    // [prid][pcid][iter] = C_stg_ptr + prid * 16 * N + pcid * 32 + iter * N;
     float *C_stg_ptr = reinterpret_cast<float*>(C + m_idx * N + n_idx);
     #pragma unroll
     for (uint32_t prid = 0; prid < 2; ++prid) {

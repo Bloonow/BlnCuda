@@ -6,6 +6,7 @@
 #include "sgemm_32x32.cu"
 #include "sgemm_32x32_slicek.cu"
 #include "sgemm_32x32_splitk.cu"
+#include "ampere_sgemm.cu"
 
 void sgemm(
     const float *A, const float *B, float *C, const float alpha,
@@ -34,6 +35,15 @@ void sgemm_rrr_v2(
     const dim3 block_size(256, 1, 1);
     const dim3 grid_size((N + 127) / 128, (M + 127) / 128, 1);
     sgemm_128x128_8x8::sgemm_rrr_128x128x8_kernel<<<grid_size, block_size>>>(A, B, C, alpha, M, N, K);
+}
+
+void ampere_sgemm_rrr(
+    const float *A, const float *B, float *C, const float alpha,
+    const uint32_t M, const uint32_t N, const uint32_t K
+) {
+    const dim3 block_size(256, 1, 1);
+    const dim3 grid_size((N + 255) / 256, (M + 127) / 128, 1);
+    sgemm_128x256_16x8::ampere_sgemm_rrr_128x256x8_kernel<<<grid_size, block_size>>>(A, B, C, alpha, M, N, K);
 }
 
 #ifndef __CUBLASLT_WARPPER__

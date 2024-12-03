@@ -164,7 +164,7 @@ void ldg_sts(const void *gmem_ptr, const uint32_t smem_addr, const uint32_t src_
     asm volatile (
         "{\n"
         ".reg .pred p;\n"
-        "setp.ne.b32 p, %2, 0;\n"
+        "setp.ne.b32 p, %3, 0;\n"
         "@p cp.async.ca.shared.global.L2::128B [%1], [%0], 4, %2;\n"
         "}\n"
         :
@@ -174,7 +174,7 @@ void ldg_sts(const void *gmem_ptr, const uint32_t smem_addr, const uint32_t src_
     asm volatile (
         "{\n"
         ".reg .pred p;\n"
-        "setp.ne.b32 p, %2, 0;\n"
+        "setp.ne.b32 p, %3, 0;\n"
         "@p cp.async.ca.shared.global [%1], [%0], 4, %2;\n"
         "}\n"
         :

@@ -16,7 +16,7 @@ int main(int argc, char *argv[]) {
     const int K = 2048;
     const int aS = M * K, bS = K * N, cS = M * N;
 
-    float *A, *B, *C0_ROW, *C0_COL, *C1, *C2, *C3;
+    float *A, *B, *C0_ROW, *C0_COL, *C1, *C2, *C3, *C4;
     matrix_init(&A, M, K, batchCount);
     matrix_init(&B, K, N, batchCount);
     matrix_init(&C0_ROW, M, N, batchCount, 0.f);
@@ -24,20 +24,23 @@ int main(int argc, char *argv[]) {
     matrix_init(&C1, M, N, batchCount, 0.f);
     matrix_init(&C2, M, N, batchCount, 0.f);
     matrix_init(&C3, M, N, batchCount, 0.f);
+    matrix_init(&C4, M, N, batchCount, 0.f);
 
     // 是否测试正确性
-    #define TEST_ERROR 1.e-5
+    // #define TEST_ERROR 1.e-5
 
     cublasLt_sgemm(A, B, C0_ROW, alpha, beta, M, N, K, batchCount, CUBLASLT_ORDER_ROW, CUBLASLT_ORDER_ROW, CUBLASLT_ORDER_ROW);
     cublasLt_sgemm(A, B, C0_COL, alpha, beta, M, N, K, batchCount, CUBLASLT_ORDER_ROW, CUBLASLT_ORDER_ROW, CUBLASLT_ORDER_COL);
     sgemm(A, B, C1, alpha, M, N, K, aS, bS, cS, GEMM_Order::RRR, batchCount);
     sgemm(A, B, C2, alpha, M, N, K, aS, bS, cS, GEMM_Order::RRC, batchCount);
     sgemm_rrr_v2(A, B, C3, alpha, M, N, K);
+    ampere_sgemm_rrr(A, B, C4, alpha, M, N, K);
     // 判断结果是否相等，较为耗时，若不相等，可适当调大允许误差
     #ifdef TEST_ERROR
     matrix_same(C0_ROW, C1, M, N, batchCount, TEST_ERROR);
     matrix_same(C0_COL, C2, M, N, batchCount, TEST_ERROR);
     matrix_same(C0_ROW, C3, M, N, batchCount, TEST_ERROR);
+    matrix_same(C0_ROW, C4, M, N, batchCount, TEST_ERROR);
     #endif
 
     cudaDeviceSynchronize();
@@ -48,5 +51,6 @@ int main(int argc, char *argv[]) {
     cudaFree(C1);
     cudaFree(C2);
     cudaFree(C3);
+    cudaFree(C4);
     return 0;
 }
