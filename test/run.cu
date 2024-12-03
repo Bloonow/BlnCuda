@@ -3,7 +3,6 @@
 
 #include "check.cu"
 #include "../gemm/sgemm.cu"
-#include "../gemm/sgemm_128x128_v2.cu"
 
 using check::matrix_init;
 using check::matrix_same;
@@ -33,7 +32,7 @@ int main(int argc, char *argv[]) {
     cublasLt_sgemm(A, B, C0_COL, alpha, beta, M, N, K, batchCount, CUBLASLT_ORDER_ROW, CUBLASLT_ORDER_ROW, CUBLASLT_ORDER_COL);
     sgemm(A, B, C1, alpha, M, N, K, aS, bS, cS, GEMM_Order::RRR, batchCount);
     sgemm(A, B, C2, alpha, M, N, K, aS, bS, cS, GEMM_Order::RRC, batchCount);
-    sgemm_rrr(A, B, C3, M, N, K);
+    sgemm_rrr_v2(A, B, C3, alpha, M, N, K);
     // 判断结果是否相等，较为耗时，若不相等，可适当调大允许误差
     #ifdef TEST_ERROR
     matrix_same(C0_ROW, C1, M, N, batchCount, TEST_ERROR);

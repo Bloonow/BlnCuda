@@ -4,6 +4,8 @@
 #include "../utils/buffer.cu"
 #include "../utils/ptx.cu"
 
+namespace sgemm_128x128_8x8 {
+
 /**
  * Matrix A, B, C : row-major
  * Threadblock Tile : [M, N, K] = [128, 128, 8]
@@ -14,7 +16,7 @@
  */
 __global__ __launch_bounds__(256, 2)
 void sgemm_rrr_128x128x8_kernel(
-    const float *A, const float *B, float *C,
+    const float *A, const float *B, float *C, const float alpha,
     const uint32_t M, const uint32_t N, const uint32_t K
 ) {
     // A and B Threadblock Tile on shared memory (double buffer)
@@ -195,6 +197,14 @@ void sgemm_rrr_128x128x8_kernel(
             }
         }
     }
+    // 应用 alpha 缩放
+    #pragma unroll
+    for (uint32_t i = 0; i < 8; ++i) {
+        #pragma unroll
+        for (uint32_t j = 0; j < 8; ++j) {
+            C_frag[i][j] *= alpha;
+        }
+    }
 
     // 重用 128 * 48 * float 共享内存空间，行主序写回矩阵 C，每次写回一个分区的 16 * 32 * 8 = 128 * 32 * float 数据
     // [trid] = C_sts_addr + trid * 32 * sizeof(float);  trid = 0, 1, 2, 3, for 4x4 Thread Tile
@@ -231,43 +241,4 @@ void sgemm_rrr_128x128x8_kernel(
     }
 }
 
-__device__ __forceinline__
-void store_result_smem_rr(
-    float Creg[8][8], float *smem_buf, float *C,
-    const uint32_t M, const uint32_t N, const uint32_t cS,
-    const uint32_t brid, const uint32_t bcid, const uint32_t tid,
-    const uint32_t wrows, const uint32_t wcols, const uint32_t wrid, const uint32_t wcid,
-    const uint32_t lrid, const uint32_t lcid
-) {
-    // 使用 32x128 共享内存搬运 128x128 数据（需 4 次），每次每线程写回 2x8 数据 Creg[r][:], Creg[r + 4][:]
-    // [NEXT] C_smem_st + (tile_rid * wrows * 128 + tile_cid * wcols * 4) * sizeof(float)
-    uint32_t C_smem_st = ptx::smem_addr(smem_buf + (wrid * wrows * 2 * 128 + wcid * wcols * 8) + (lrid * 128 + lcid * 4));
-    float *C_block = C + (blockIdx.z * cS + brid * 128 * N + bcid * 128);
-    for (uint32_t r = 0; r < 4; ++r) {
-        __syncthreads();
-        // 将数据写入到共享内存
-        ptx::sts(Creg[r][0], Creg[r][1], Creg[r][2], Creg[r][3], C_smem_st + (0 * wrows * 128 + 0 * wcols * 4) * sizeof(float));
-        ptx::sts(Creg[r][4], Creg[r][5], Creg[r][6], Creg[r][7], C_smem_st + (0 * wrows * 128 + 1 * wcols * 4) * sizeof(float));
-        ptx::sts(Creg[r+4][0], Creg[r+4][1], Creg[r+4][2], Creg[r+4][3], C_smem_st + (1 * wrows * 128 + 0 * wcols * 4) * sizeof(float));
-        ptx::sts(Creg[r+4][4], Creg[r+4][5], Creg[r+4][6], Creg[r+4][7], C_smem_st + (1 * wrows * 128 + 1 * wcols * 4) * sizeof(float));
-        __syncthreads();
-        // 使用 2x128 排列的线程搬运 32x128 共享内存（需 16 次），每次每线程写回 1 个数据
-        #pragma unroll
-        for (uint32_t gmem_row = r; gmem_row < 128; gmem_row += 4 * 2) {
-            ptx::stg(
-                *reinterpret_cast<float*>(smem_buf + gmem_row / 4 * 128 + tid),
-                C_block + (gmem_row + tid / 128 * 4) * N + (tid % 128),
-                (brid * 128 + gmem_row + tid / 128 * 4 < M) && (bcid * 128 + tid % 128 < N)
-            );
-        }
-    }
-}
-
-void sgemm_rrr(
-    const float *A, const float *B, float *C,
-    const uint32_t M, const uint32_t N, const uint32_t K
-) {
-    const dim3 block_size(256, 1, 1);
-    const dim3 grid_size((N + 127) / 128, (M + 127) / 128, 1);
-    sgemm_rrr_128x128x8_kernel<<<grid_size, block_size>>>(A, B, C, M, N, K);
-}
+} // namespace sgemm_128x128_8x8

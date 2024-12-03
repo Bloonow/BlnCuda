@@ -2,6 +2,7 @@
 
 #include <cuda.h>
 #include "sgemm_128x128.cu"
+#include "sgemm_128x128_v2.cu"
 #include "sgemm_32x32.cu"
 #include "sgemm_32x32_slicek.cu"
 #include "sgemm_32x32_splitk.cu"
@@ -26,6 +27,14 @@ void sgemm(
     }
 }
 
+void sgemm_rrr_v2(
+    const float *A, const float *B, float *C, const float alpha,
+    const uint32_t M, const uint32_t N, const uint32_t K
+) {
+    const dim3 block_size(256, 1, 1);
+    const dim3 grid_size((N + 127) / 128, (M + 127) / 128, 1);
+    sgemm_128x128_8x8::sgemm_rrr_128x128x8_kernel<<<grid_size, block_size>>>(A, B, C, alpha, M, N, K);
+}
 
 #ifndef __CUBLASLT_WARPPER__
 #define __CUBLASLT_WARPPER__
