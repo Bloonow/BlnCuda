@@ -124,9 +124,7 @@ void stg(const float &reg, void *ptr, bool guard) {
     );
 }
 
-// Ampere Architecture
-#define __CUDA_ARCH__ 860
-#if (__CUDA_ARCH__ >= 860)
+/* Ampere Architecture */
 
 __device__ __forceinline__
 void ldg_sts(const void *gmem_ptr, const uint32_t smem_addr, bool guard) {
@@ -188,7 +186,5 @@ void ldg_sts_commit() {
     // 等待异步复制指令执行完成
     asm volatile ("cp.async.wait_all;\n"::);
 }
-
-#endif
 
 } // namespace ptx
