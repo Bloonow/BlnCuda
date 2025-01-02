@@ -27,7 +27,7 @@ int main(int argc, char *argv[]) {
     matrix_init(&C4, M, N, batchCount, 0.f);
 
     // 是否测试正确性
-    // #define TEST_ERROR 1.e-5
+    #define TEST_ERROR 1.e-5
 
     cublasLt_sgemm(A, B, C0_ROW, alpha, beta, M, N, K, batchCount, CUBLASLT_ORDER_ROW, CUBLASLT_ORDER_ROW, CUBLASLT_ORDER_ROW);
     cublasLt_sgemm(A, B, C0_COL, alpha, beta, M, N, K, batchCount, CUBLASLT_ORDER_ROW, CUBLASLT_ORDER_ROW, CUBLASLT_ORDER_COL);
