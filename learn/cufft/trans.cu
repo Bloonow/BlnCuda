@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <cuda.h>
 #include <cufft.h>
-#include "../helper.cu"
+#include "../../utils/helper.cu"
 
 __global__ void scale_kernel(cufftComplex* data, float factor, const int count) {
     const int tid = blockIdx.x * blockDim.x + threadIdx.x;
@@ -43,8 +43,7 @@ int main(int argc, char *argv[]) {
     cufftDestroy(plan2D_c2r);
 
     cudaMemcpy(h_reslut, d_result, Batch * N1 * N2 * sizeof(cufftReal), cudaMemcpyDeviceToHost);
-    bool same = check_same<cufftReal>(h_reslut, h_input, Batch * N1 * N2, 1.e-3);
-    printf(same ? "|| SAME ||\n" : "|| NOT SAME ||\n");
+    check_same<cufftReal>(h_reslut, h_input, Batch * N1 * N2, 1.e-3);
 
     free_memory(5, h_input, h_reslut, d_input, d_result, d_temp);
     return 0;

@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <cuda.h>
 #include <cublasLt.h>
-#include "../helper.cu"
+#include "../../utils/helper.cu"
 
 int main(int argc, char *argv[]) {
     int32_t Batch = 4;
@@ -86,11 +86,10 @@ int main(int argc, char *argv[]) {
     cudaMemcpy(ret_D, d_D, sizeof(float) * Batch * M * N, cudaMemcpyDeviceToHost);
 
     // 主机乘法验证
-    host_matmul_relu<float>(
-        M, N, K, COL_MAJOR, COL_MAJOR, COL_MAJOR, COL_MAJOR, h_A, h_B, h_C, h_D, h_bias, alpha, beta, Batch
+    host_matmul_relu<float, col_major, col_major, col_major, col_major>(
+        h_A, h_B, h_C, h_D, h_bias, alpha, beta, M, N, K, Batch
     );
-    bool same = check_same<float>(h_D, ret_D, Batch * M * N, 1e-4);
-    printf(same ? "|| SAME ||\n" : "|| NOT SAME ||\n");
+    check_same<float>(h_D, ret_D, Batch * M * N, 1e-4);
 
     // 释放资源
     cublasLtMatmulPreferenceDestroy(preference);

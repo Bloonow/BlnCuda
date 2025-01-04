@@ -3,7 +3,7 @@
 #include <cutlass/gemm/device/gemm.h>
 #include <cutlass/gemm/device/gemm_batched.h>
 #include <cutlass/gemm/device/gemm_array.h>
-#include "../helper.cu"
+#include "../../utils/helper.cu"
 
 void gemm_demo() {
     int M = 456, N = 987, K = 543;
@@ -29,8 +29,7 @@ void gemm_demo() {
     cudaMemcpy(ret_C, d_C, sizeof(float) * M * N, cudaMemcpyDeviceToHost);
 
     host_gemm<float>(M, N, K, COL_MAJOR, COL_MAJOR, COL_MAJOR, h_A, h_B, h_C, alpha, beta, 1);
-    bool same = check_same<float>(h_C, ret_C,  M * N, 1.e-4);
-    printf(same ? "|| SAME ||\n" : "|| NOT SAME ||\n");
+    check_same<float>(h_C, ret_C,  M * N, 1.e-4);
 
     free_memory(7, h_A, h_B, h_C, ret_C, d_A, d_B, d_C);
 }
@@ -58,8 +57,7 @@ void gemm_batched_demo() {
     cudaMemcpy(ret_C, d_C, sizeof(float) * Batch * M * N, cudaMemcpyDeviceToHost);
 
     host_gemm<float>(M, N, K, COL_MAJOR, COL_MAJOR, COL_MAJOR, h_A, h_B, h_C, alpha, beta, Batch);
-    bool same = check_same<float>(h_C, ret_C, Batch * M * N, 1e-4);
-    printf(same ? "|| SAME ||\n" : "|| NOT SAME ||\n");
+    check_same<float>(h_C, ret_C, Batch * M * N, 1e-4);
 
     free_memory(7, h_A, h_B, h_C, ret_C, d_A, d_B, d_C);
 }
@@ -96,8 +94,7 @@ void gemm_array_demo() {
     cudaMemcpy(ret_C, d_C, sizeof(float) * Batch * M * N, cudaMemcpyDeviceToHost);
 
     host_gemm<float>(M, N, K, COL_MAJOR, COL_MAJOR, COL_MAJOR, h_A, h_B, h_C, alpha, beta, Batch);
-    bool same = check_same<float>(h_C, ret_C, Batch * M * N, 1e-4);
-    printf(same ? "|| SAME ||\n" : "|| NOT SAME ||\n");
+    check_same<float>(h_C, ret_C, Batch * M * N, 1e-4);
 
     free_memory(10, h_A, h_B, h_C, ret_C, d_A, d_B, d_C, dd_A_array, dd_B_array, dd_C_array);
 }
