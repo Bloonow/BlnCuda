@@ -23,7 +23,6 @@ int main(int argc, char *argv[]) {
     cudaMemcpy(ret_C, d_C, sizeof(float) * Batch * M * N, cudaMemcpyDeviceToHost);
     cublasDestroy_v2(handle);
 
-    // host_gemm<float>(M, N, K, COL_MAJOR, COL_MAJOR, COL_MAJOR, h_A, h_B, h_C, alpha, beta, Batch);
     host_gemm<float, col_major, col_major, col_major>(h_A, h_B, h_C, alpha, beta, M, N, K, Batch);
     check_same<float>(h_C, ret_C, Batch * M * N, 1e-4);
 

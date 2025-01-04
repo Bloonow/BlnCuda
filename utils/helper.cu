@@ -40,12 +40,12 @@ void free_memory(size_t count, ...) {
 }
 
 template<typename Ty>
-bool check_same(Ty *d1, Ty *d2, size_t count, Ty error = 1e-5) {
+bool check_same(Ty *ptr1, Ty *ptr2, size_t count, Ty error = 1e-5) {
     bool same = true;
-    printf("🔵 Data same checking... 🧐🧐🧐 --> between [%p] and [%p] address.\n", d1, d2);
+    printf("🔵 Data same checking... 🧐🧐🧐 --> between [%p] and [%p] address.\n", ptr1, ptr2);
     for (size_t i = 0; i < count; i++) {
-        if (abs(d1[i] - d2[i]) >= error) {
-            printf("🔴 Data are not same! 🤡🤡🤡 --> d1[%ld] = %lf != %lf = d2[%ld]\n", i, d1[i], d2[i], i);
+        if (abs(ptr1[i] - ptr2[i]) >= error) {
+            printf("🔴 Data are not same! 🤡🤡🤡 --> ptr1[%ld] = %lf != %lf = ptr2[%ld]\n", i, ptr1[i], ptr2[i], i);
             same = false;
             break;
         }

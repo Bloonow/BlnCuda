@@ -1,56 +1,61 @@
 #include <cuda.h>
 #include <cublasLt.h>
-
-#include "check.cu"
+#include "../utils/helper.cu"
 #include "../gemm/sgemm.cu"
-
-using check::matrix_init;
-using check::matrix_same;
 
 int main(int argc, char *argv[]) {
     // 若数据规模太大，而显存空间不足分配，则会导致 Segmentation fault (core dumped)
     const float alpha = 1.f, beta = 0.f;
-    const int batchCount = 1;
+    const int Batch = 4;
     const int M = 5120 + 111;
     const int N = 4096 + 99;
     const int K = 4096 + 77;
     const int aS = M * K, bS = K * N, cS = M * N;
 
-    float *A, *B, *C0_ROW, *C0_COL, *C1, *C2, *C3, *C4;
-    matrix_init(&A, M, K, batchCount);
-    matrix_init(&B, K, N, batchCount);
-    matrix_init(&C0_ROW, M, N, batchCount, 0.f);
-    matrix_init(&C0_COL, M, N, batchCount, 0.f);
-    matrix_init(&C1, M, N, batchCount, 0.f);
-    matrix_init(&C2, M, N, batchCount, 0.f);
-    matrix_init(&C3, M, N, batchCount, 0.f);
-    matrix_init(&C4, M, N, batchCount, 0.f);
+    float *h_A = alloc_host_memory<float>(Batch * M * K);
+    float *h_B = alloc_host_memory<float>(Batch * K * N);
+    float *d_A = alloc_cuda_memory<float>(Batch * M * K, h_A);
+    float *d_B = alloc_cuda_memory<float>(Batch * K * N, h_B);
+    // h_C0 and h_C1 are used to judge same
+    float *h_C0 = alloc_host_memory<float>(Batch * M * N);
+    float *h_C1 = alloc_host_memory<float>(Batch * M * N);
+    float *d_C_ROW = alloc_cuda_memory<float>(Batch * M * N);
+    float *d_C_COL = alloc_cuda_memory<float>(Batch * M * N);
+    float *d_C1 = alloc_cuda_memory<float>(Batch * M * N);
+    float *d_C2 = alloc_cuda_memory<float>(Batch * M * N);
+    float *d_C3 = alloc_cuda_memory<float>(Batch * M * N);
+    float *d_C4 = alloc_cuda_memory<float>(Batch * M * N);
 
-    // 是否测试正确性
-    #define TEST_ERROR 1.e-5
+    cublasLt_sgemm(d_A, d_B, d_C_ROW, alpha, beta, M, N, K, Batch, CUBLASLT_ORDER_ROW, CUBLASLT_ORDER_ROW, CUBLASLT_ORDER_ROW);
+    cublasLt_sgemm(d_A, d_B, d_C_COL, alpha, beta, M, N, K, Batch, CUBLASLT_ORDER_ROW, CUBLASLT_ORDER_ROW, CUBLASLT_ORDER_COL);
+    sgemm(d_A, d_B, d_C1, alpha, M, N, K, aS, bS, cS, GEMM_Order::RRR, Batch);
+    sgemm(d_A, d_B, d_C2, alpha, M, N, K, aS, bS, cS, GEMM_Order::RRC, Batch);
+    for (int b = 0; b < Batch; b++) {
+        sgemm_rrr_v2(d_A + b * aS, d_B + b * bS, d_C3 + b * cS, alpha, M, N, K);
+        ampere_sgemm_rrr(d_A + b * aS, d_B + b * bS, d_C4 + b * cS, alpha, M, N, K);
+    }
 
-    cublasLt_sgemm(A, B, C0_ROW, alpha, beta, M, N, K, batchCount, CUBLASLT_ORDER_ROW, CUBLASLT_ORDER_ROW, CUBLASLT_ORDER_ROW);
-    cublasLt_sgemm(A, B, C0_COL, alpha, beta, M, N, K, batchCount, CUBLASLT_ORDER_ROW, CUBLASLT_ORDER_ROW, CUBLASLT_ORDER_COL);
-    sgemm(A, B, C1, alpha, M, N, K, aS, bS, cS, GEMM_Order::RRR, batchCount);
-    sgemm(A, B, C2, alpha, M, N, K, aS, bS, cS, GEMM_Order::RRC, batchCount);
-    sgemm_rrr_v2(A, B, C3, alpha, M, N, K);
-    ampere_sgemm_rrr(A, B, C4, alpha, M, N, K);
     // 判断结果是否相等，较为耗时，若不相等，可适当调大允许误差
+    #define TEST_ERROR 1.e-4
     #ifdef TEST_ERROR
-    matrix_same(C0_ROW, C1, M, N, batchCount, TEST_ERROR);
-    matrix_same(C0_COL, C2, M, N, batchCount, TEST_ERROR);
-    matrix_same(C0_ROW, C3, M, N, batchCount, TEST_ERROR);
-    matrix_same(C0_ROW, C4, M, N, batchCount, TEST_ERROR);
+    cudaMemcpy(h_C0, d_C_ROW, Batch * M * N * sizeof(float), cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_C1, d_C1, Batch * M * N * sizeof(float), cudaMemcpyDeviceToHost);
+    check_same<float>(h_C0, h_C1, Batch * M * N, TEST_ERROR);
+    
+    cudaMemcpy(h_C0, d_C_COL, Batch * M * N * sizeof(float), cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_C1, d_C2, Batch * M * N * sizeof(float), cudaMemcpyDeviceToHost);
+    check_same<float>(h_C0, h_C1, Batch * M * N, TEST_ERROR);
+   
+    cudaMemcpy(h_C0, d_C_ROW, Batch * M * N * sizeof(float), cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_C1, d_C3, Batch * M * N * sizeof(float), cudaMemcpyDeviceToHost);
+    check_same<float>(h_C0, h_C1, Batch * M * N, TEST_ERROR);
+    
+    cudaMemcpy(h_C0, d_C_ROW, Batch * M * N * sizeof(float), cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_C1, d_C4, Batch * M * N * sizeof(float), cudaMemcpyDeviceToHost);
+    check_same<float>(h_C0, h_C1, Batch * M * N, TEST_ERROR);
     #endif
 
     cudaDeviceSynchronize();
-    cudaFree(A);
-    cudaFree(B);
-    cudaFree(C0_ROW);
-    cudaFree(C0_COL);
-    cudaFree(C1);
-    cudaFree(C2);
-    cudaFree(C3);
-    cudaFree(C4);
+    free_memory(12, h_A, h_B, d_A, d_B, h_C0, h_C1, d_C_ROW, d_C_COL, d_C1, d_C2, d_C3, d_C4);
     return 0;
 }

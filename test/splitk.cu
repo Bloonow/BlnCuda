@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <cuda.h>
 #include <cublasLt.h>
-#include "../learn/helper.cu"
+#include "../utils/helper.cu"
 
 int main(int argc, char *argv[]) {
     int32_t Batch = 4;
