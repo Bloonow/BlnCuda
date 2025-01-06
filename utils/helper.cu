@@ -1,5 +1,5 @@
 #include <cuda.h>
-#include <cuda_fp16.hpp>
+#include <cuda_fp16.h>
 #include <time.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -143,7 +143,7 @@ void host_gemm(
             for (size_t cid = 0; cid < N; cid++) {
                 float value = 0;
                 for (size_t kid = 0; kid < K; kid++) {
-                    value += __half2float(A_(bid, rid, kid)) * __half2float(B_(bid, kid, cid));
+                    value += (float)(A_(bid, rid, kid)) * (float)(B_(bid, kid, cid));
                 }
                 C_(bid, rid, cid) = alpha * value + beta * C_(bid, rid, cid);
             }
