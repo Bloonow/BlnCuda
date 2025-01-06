@@ -206,40 +206,6 @@ void sgemm_rrr_128x128x8_kernel(
         }
     }
 
-    // // 重用 128 * 48 * float 共享内存空间，行主序写回矩阵 C，每次写回一个分区的 16 * 32 * 8 Warp = 128 * 32 * float 数据
-    // // [trid] = C_sts_addr + trid * 32 * sizeof(float); for 4x4 Thread Tile, trid = 0, 1, 2, 3
-    // uint32_t C_sts_addr = ptx::smem_addr(smem_buf + warp_id * 16 * 32 + lane_rid * 4 * 32 + lane_cid * 4);
-    // // [iter] = C_lds_ptr + iter * 32; for 16x32 Warp Tile, iter = 0, 1, 2, ..., 15
-    // const float *C_lds_ptr = reinterpret_cast<const float*>(smem_buf + warp_id * 16 * 32 + lane_id);
-    // // 将矩阵 C 写回设备内存时的，每个线程对应数据的偏移
-    // uint32_t m_idx = blockIdx.y * 128 + warp_id / 2 * 32;
-    // uint32_t n_idx = blockIdx.x * 128 + warp_id % 2 * 64 + lane_id;
-    // // [prid][pcid][iter] = C_stg_ptr + prid * 16 * N + pcid * 32 + iter * N;
-    // float *C_stg_ptr = reinterpret_cast<float*>(C + m_idx * N + n_idx);
-    // #pragma unroll
-    // for (uint32_t prid = 0; prid < 2; ++prid) {
-    //     #pragma unroll
-    //     for (uint32_t pcid = 0; pcid < 2; ++pcid) {
-    //         __syncthreads();
-    //         #pragma unroll
-    //         for (uint32_t trid = 0; trid < 4; ++trid) {
-    //             ptx::sts(
-    //                 C_frag[prid * 4 + trid][pcid * 4 + 0], C_frag[prid * 4 + trid][pcid * 4 + 1],
-    //                 C_frag[prid * 4 + trid][pcid * 4 + 2], C_frag[prid * 4 + trid][pcid * 4 + 3],
-    //                 C_sts_addr + trid * 32 * sizeof(float)
-    //             );
-    //         }
-    //         __syncthreads();
-    //         #pragma unroll
-    //         for (uint32_t iter = 0; iter < 16; ++iter) {
-    //             ptx::stg(
-    //                 C_lds_ptr[iter * 32], C_stg_ptr + prid * 16 * N + pcid * 32 + iter * N,
-    //                 (m_idx + prid * 16 + iter < M) && (n_idx + pcid * 32 < N)
-    //             );
-    //         }
-    //     }
-    // }
-
     // 以行主序的方式写回矩阵 C_tile 的结果，一行一行地写回，并使用共享内存对数据的布局进行重排，以合并访存
     // 因为一个线程持有 C_frag 数据，而这些数据又划分为 sub-partitions 子分区，每次写回一个子分区 C_sub[4][4] 的数据
     // 在每个线程将 C_sub 写入共享内存时，所使用的地址，共需要 256 * 16 * float 的共享内存空间
