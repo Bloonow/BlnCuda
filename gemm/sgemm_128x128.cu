@@ -8,10 +8,10 @@
 namespace sgemm_128x128_8x8 {
 
 /* [WHEN] General */
-struct TileIndex {
+struct ShapeLayout {
     uint32_t brid, bcid, tid, wid, lid;
     uint32_t wrows, wcols, wrid, wcid, lrid, lcid;
-    __device__ TileIndex() {
+    __device__ ShapeLayout() {
         // 线程块与线程的标识
         brid = blockIdx.y; bcid = blockIdx.x;
         tid = threadIdx.x; wid = tid / 32; lid = tid % 32;
@@ -564,15 +564,15 @@ __global__ void sgemm_rrr_kernel(
     const uint32_t aS, const uint32_t bS, const uint32_t cS
 ) {
     float *smem_buf = buffer::SharedMemory<float, 1024 * 6>().pointer();
-    TileIndex T;
+    ShapeLayout SL;
     float Creg[8][8] = {0.f};
     compute_block_rrr(
         Creg, smem_buf, A, B, alpha, M, N, K, aS, bS,
-        T.brid, T.bcid, T.tid, T.wid, T.lid, T.wrows, T.wcols, T.wrid, T.wcid, T.lrid, T.lcid
+        SL.brid, SL.bcid, SL.tid, SL.wid, SL.lid, SL.wrows, SL.wcols, SL.wrid, SL.wcid, SL.lrid, SL.lcid
     );
     store_result_smem_rr(
         Creg, smem_buf, C, M, N, cS, 
-        T.brid, T.bcid, T.tid, T.wrows, T.wcols, T.wrid, T.wcid, T.lrid, T.lcid
+        SL.brid, SL.bcid, SL.tid, SL.wrows, SL.wcols, SL.wrid, SL.wcid, SL.lrid, SL.lcid
     );
 }
 
@@ -583,15 +583,15 @@ __global__ void sgemm_rrc_kernel(
     const uint32_t aS, const uint32_t bS, const uint32_t cS
 ) {
     float *smem_buf = buffer::SharedMemory<float, 1024 * 6>().pointer();
-    TileIndex T;
+    ShapeLayout SL;
     float Creg[8][8] = {0.f};
     compute_block_rrr(
         Creg, smem_buf, A, B, alpha, M, N, K, aS, bS,
-        T.brid, T.bcid, T.tid, T.wid, T.lid, T.wrows, T.wcols, T.wrid, T.wcid, T.lrid, T.lcid
+        SL.brid, SL.bcid, SL.tid, SL.wid, SL.lid, SL.wrows, SL.wcols, SL.wrid, SL.wcid, SL.lrid, SL.lcid
     );
     store_result_smem_rc(
         Creg, smem_buf, C, M, N, cS, 
-        T.brid, T.bcid, T.tid, T.wrows, T.wcols, T.wrid, T.wcid, T.lrid, T.lcid
+        SL.brid, SL.bcid, SL.tid, SL.wrows, SL.wcols, SL.wrid, SL.wcid, SL.lrid, SL.lcid
     );
 }
 
@@ -602,15 +602,15 @@ __global__ void sgemm_rcr_kernel(
     const uint32_t aS, const uint32_t bS, const uint32_t cS
 ) {
     float *smem_buf = buffer::SharedMemory<float, 1024 * 8>().pointer();
-    TileIndex T;
+    ShapeLayout SL;
     float Creg[8][8] = {0.f};
     compute_block_rcr(
         Creg, smem_buf, A, B, alpha, M, N, K, aS, bS,
-        T.brid, T.bcid, T.tid, T.wid, T.lid, T.wrows, T.wcols, T.wrid, T.wcid, T.lrid, T.lcid
+        SL.brid, SL.bcid, SL.tid, SL.wid, SL.lid, SL.wrows, SL.wcols, SL.wrid, SL.wcid, SL.lrid, SL.lcid
     );
     store_result_smem_rr(
         Creg, smem_buf, C, M, N, cS, 
-        T.brid, T.bcid, T.tid, T.wrows, T.wcols, T.wrid, T.wcid, T.lrid, T.lcid
+        SL.brid, SL.bcid, SL.tid, SL.wrows, SL.wcols, SL.wrid, SL.wcid, SL.lrid, SL.lcid
     );
 }
 
@@ -621,15 +621,15 @@ __global__ void sgemm_rcc_kernel(
     const uint32_t aS, const uint32_t bS, const uint32_t cS
 ) {
     float *smem_buf = buffer::SharedMemory<float, 1024 * 8>().pointer();
-    TileIndex T;
+    ShapeLayout SL;
     float Creg[8][8] = {0.f};
     compute_block_rcr(
         Creg, smem_buf, A, B, alpha, M, N, K, aS, bS,
-        T.brid, T.bcid, T.tid, T.wid, T.lid, T.wrows, T.wcols, T.wrid, T.wcid, T.lrid, T.lcid
+        SL.brid, SL.bcid, SL.tid, SL.wid, SL.lid, SL.wrows, SL.wcols, SL.wrid, SL.wcid, SL.lrid, SL.lcid
     );
     store_result_smem_rc(
         Creg, smem_buf, C, M, N, cS, 
-        T.brid, T.bcid, T.tid, T.wrows, T.wcols, T.wrid, T.wcid, T.lrid, T.lcid
+        SL.brid, SL.bcid, SL.tid, SL.wrows, SL.wcols, SL.wrid, SL.wcid, SL.lrid, SL.lcid
     );
 }
 
@@ -640,15 +640,15 @@ __global__ void sgemm_crr_kernel(
     const uint32_t aS, const uint32_t bS, const uint32_t cS
 ) {
     float *smem_buf = buffer::SharedMemory<float, 1024 * 4>().pointer();
-    TileIndex T;
+    ShapeLayout SL;
     float Creg[8][8] = {0.f};
     compute_block_crr(
         Creg, smem_buf, A, B, alpha, M, N, K, aS, bS,
-        T.brid, T.bcid, T.tid, T.wid, T.lid, T.wrows, T.wcols, T.wrid, T.wcid, T.lrid, T.lcid
+        SL.brid, SL.bcid, SL.tid, SL.wid, SL.lid, SL.wrows, SL.wcols, SL.wrid, SL.wcid, SL.lrid, SL.lcid
     );
     store_result_smem_rr(
         Creg, smem_buf, C, M, N, cS, 
-        T.brid, T.bcid, T.tid, T.wrows, T.wcols, T.wrid, T.wcid, T.lrid, T.lcid
+        SL.brid, SL.bcid, SL.tid, SL.wrows, SL.wcols, SL.wrid, SL.wcid, SL.lrid, SL.lcid
     );
 }
 
@@ -659,15 +659,15 @@ __global__ void sgemm_crc_kernel(
     const uint32_t aS, const uint32_t bS, const uint32_t cS
 ) {
     float *smem_buf = buffer::SharedMemory<float, 1024 * 4>().pointer();
-    TileIndex T;
+    ShapeLayout SL;
     float Creg[8][8] = {0.f};
     compute_block_crr(
         Creg, smem_buf, A, B, alpha, M, N, K, aS, bS,
-        T.brid, T.bcid, T.tid, T.wid, T.lid, T.wrows, T.wcols, T.wrid, T.wcid, T.lrid, T.lcid
+        SL.brid, SL.bcid, SL.tid, SL.wid, SL.lid, SL.wrows, SL.wcols, SL.wrid, SL.wcid, SL.lrid, SL.lcid
     );
     store_result_smem_rc(
         Creg, smem_buf, C, M, N, cS, 
-        T.brid, T.bcid, T.tid, T.wrows, T.wcols, T.wrid, T.wcid, T.lrid, T.lcid
+        SL.brid, SL.bcid, SL.tid, SL.wrows, SL.wcols, SL.wrid, SL.wcid, SL.lrid, SL.lcid
     );
 }
 
@@ -678,15 +678,15 @@ __global__ void sgemm_ccr_kernel(
     const uint32_t aS, const uint32_t bS, const uint32_t cS
 ) {
     float *smem_buf = buffer::SharedMemory<float, 1024 * 6>().pointer();
-    TileIndex T;
+    ShapeLayout SL;
     float Creg[8][8] = {0.f};
     compute_block_ccr(
         Creg, smem_buf, A, B, alpha, M, N, K, aS, bS,
-        T.brid, T.bcid, T.tid, T.wid, T.lid, T.wrows, T.wcols, T.wrid, T.wcid, T.lrid, T.lcid
+        SL.brid, SL.bcid, SL.tid, SL.wid, SL.lid, SL.wrows, SL.wcols, SL.wrid, SL.wcid, SL.lrid, SL.lcid
     );
     store_result_smem_rr(
         Creg, smem_buf, C, M, N, cS, 
-        T.brid, T.bcid, T.tid, T.wrows, T.wcols, T.wrid, T.wcid, T.lrid, T.lcid
+        SL.brid, SL.bcid, SL.tid, SL.wrows, SL.wcols, SL.wrid, SL.wcid, SL.lrid, SL.lcid
     );
 }
 
@@ -697,15 +697,15 @@ __global__ void sgemm_ccc_kernel(
     const uint32_t aS, const uint32_t bS, const uint32_t cS
 ) {
     float *smem_buf = buffer::SharedMemory<float, 1024 * 6>().pointer();
-    TileIndex T;
+    ShapeLayout SL;
     float Creg[8][8] = {0.f};
     compute_block_ccr(
         Creg, smem_buf, A, B, alpha, M, N, K, aS, bS,
-        T.brid, T.bcid, T.tid, T.wid, T.lid, T.wrows, T.wcols, T.wrid, T.wcid, T.lrid, T.lcid
+        SL.brid, SL.bcid, SL.tid, SL.wid, SL.lid, SL.wrows, SL.wcols, SL.wrid, SL.wcid, SL.lrid, SL.lcid
     );
     store_result_smem_rc(
         Creg, smem_buf, C, M, N, cS, 
-        T.brid, T.bcid, T.tid, T.wrows, T.wcols, T.wrid, T.wcid, T.lrid, T.lcid
+        SL.brid, SL.bcid, SL.tid, SL.wrows, SL.wcols, SL.wrid, SL.wcid, SL.lrid, SL.lcid
     );
 }
 

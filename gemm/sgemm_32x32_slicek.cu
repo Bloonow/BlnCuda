@@ -7,12 +7,12 @@
 namespace sgemm_32x32_4x8_SliceK {
 
 /* [WHEN] 48 < K <= 256 */
-struct TileIndexSliceK {
+struct ShapeLayoutSliceK {
     uint32_t brid, bcid, tid, wid, lid;
     uint32_t wrows, wcols, lrid, lcid;
     uint32_t M, N, K, aS, bS, cS;
     // uint32_t slice_len, slice_idx;
-    __device__ TileIndexSliceK(const uint32_t M, const uint32_t N, const uint32_t K, const uint32_t aS, const uint32_t bS, const uint32_t cS) {
+    __device__ ShapeLayoutSliceK(const uint32_t M, const uint32_t N, const uint32_t K, const uint32_t aS, const uint32_t bS, const uint32_t cS) {
         // 线程块与线程的标识
         brid = blockIdx.y; bcid = blockIdx.x; tid = threadIdx.x; wid = tid / 32; lid = tid % 32;
         // 线程束的排列布局
@@ -165,77 +165,77 @@ void compute_tile_crr(
 
 __device__ __forceinline__
 void compute_block_rrr(
-    float Creg[2][4][4], float *smem_buf, const float *A, const float *B, const float alpha, const TileIndexSliceK &T
+    float Creg[2][4][4], float *smem_buf, const float *A, const float *B, const float alpha, const ShapeLayoutSliceK &SL
 ) {
-    float *Asmem = reinterpret_cast<float*>(smem_buf + 1024 * T.wid);
-    float *Bsmem = reinterpret_cast<float*>(smem_buf + 1024 * T.wid + (128 + 32) * 2);
+    float *Asmem = reinterpret_cast<float*>(smem_buf + 1024 * SL.wid);
+    float *Bsmem = reinterpret_cast<float*>(smem_buf + 1024 * SL.wid + (128 + 32) * 2);
 
-    // [NEXT] A_lid + eid * T.K + kth * 16       + slice_idx * 4
-    // [NEXT] B_lid + eid * T.N + kth * 16 * T.N + slice_idx * 4 * T.N
-    const float *A_lid = A + (blockIdx.z * T.aS + T.brid * 32 * T.K) + (T.lid / 4 * 4 * T.K + T.lid % 4);
-    const float *B_lid = B + (blockIdx.z * T.bS + T.bcid * 32) + T.lid;
+    // [NEXT] A_lid + eid * SL.K + kth * 16       + slice_idx * 4
+    // [NEXT] B_lid + eid * SL.N + kth * 16 * SL.N + slice_idx * 4 * SL.N
+    const float *A_lid = A + (blockIdx.z * SL.aS + SL.brid * 32 * SL.K) + (SL.lid / 4 * 4 * SL.K + SL.lid % 4);
+    const float *B_lid = B + (blockIdx.z * SL.bS + SL.bcid * 32) + SL.lid;
     float Atrans[4] = {}, Btrans[4] = {};
 
     // valid[eid] 标识 eid 数据是否为有效数据，有效元素指未越界的数据
     uint32_t A_valid = 0U, B_valid = 0U;
     #pragma unroll
     for (uint32_t eid = 0; eid < 4; ++eid) {
-        if (T.brid * 32 + T.lid / 4 * 4 + eid < T.M) A_valid |= (1u << eid);
-        if (T.bcid * 32 + T.lid < T.N)               B_valid |= (1u << eid);
+        if (SL.brid * 32 + SL.lid / 4 * 4 + eid < SL.M) A_valid |= (1u << eid);
+        if (SL.bcid * 32 + SL.lid < SL.N)               B_valid |= (1u << eid);
     }
 
     // 一次完整的 slice_num = 4 迭代在 K 的维度上读取 slice_num * slice_len = 4 * 4 = 16 的数据，首先处理刚开始的可能情况
-    uint32_t kstart = T.K - ((T.K + 15) / 16 - 1) * 16;  // [1, 2, 3, ..., 16]
+    uint32_t kstart = SL.K - ((SL.K + 15) / 16 - 1) * 16;  // [1, 2, 3, ..., 16]
     // 预取可能不足 16 个的元素
     #pragma unroll
     for (uint32_t eid = 0; eid < 4; ++eid) {
-        if ((A_valid & (1u << eid)) && (T.wid * 4 + T.lid % 4 < kstart)) {
-            Atrans[eid] = *reinterpret_cast<const float*>(A_lid + T.wid * 4 + eid * T.K);
+        if ((A_valid & (1u << eid)) && (SL.wid * 4 + SL.lid % 4 < kstart)) {
+            Atrans[eid] = *reinterpret_cast<const float*>(A_lid + SL.wid * 4 + eid * SL.K);
         }
-        if ((B_valid & (1u << eid)) && (T.wid * 4 + eid < kstart)) {
-            Btrans[eid] = *reinterpret_cast<const float*>(B_lid + T.wid * 4 * T.N + eid * T.N);
+        if ((B_valid & (1u << eid)) && (SL.wid * 4 + eid < kstart)) {
+            Btrans[eid] = *reinterpret_cast<const float*>(B_lid + SL.wid * 4 * SL.N + eid * SL.N);
         }
     }
 
     // 将预取数据写入到共享内存
     // 此处采用 32 + 4 是因为使用 4 做偏移时，保证可使用 float4 向量化读写共享内存，且使用 float4 写入时不存在 bank 冲突
-    *reinterpret_cast<float4*>(Asmem + T.lid % 4 * 36 + T.lid / 4 * 4) = *reinterpret_cast<float4*>(Atrans);
-    Bsmem[T.lid + 0 * 32] = Btrans[0];
-    Bsmem[T.lid + 1 * 32] = Btrans[1];
-    Bsmem[T.lid + 2 * 32] = Btrans[2];
-    Bsmem[T.lid + 3 * 32] = Btrans[3];
+    *reinterpret_cast<float4*>(Asmem + SL.lid % 4 * 36 + SL.lid / 4 * 4) = *reinterpret_cast<float4*>(Atrans);
+    Bsmem[SL.lid + 0 * 32] = Btrans[0];
+    Bsmem[SL.lid + 1 * 32] = Btrans[1];
+    Bsmem[SL.lid + 2 * 32] = Btrans[2];
+    Bsmem[SL.lid + 3 * 32] = Btrans[3];
     __syncthreads();
     A_lid += kstart;
-    B_lid += kstart * T.N;
+    B_lid += kstart * SL.N;
 
     // 在 K 的维度轴上进行循环迭代，计算矩阵 C 的子区域
-    for (uint32_t kth = 1; kth < (T.K + 15) / 16; ++kth) {
+    for (uint32_t kth = 1; kth < (SL.K + 15) / 16; ++kth) {
         // 预取 kth 的数据
         #pragma unroll
         for (uint32_t eid = 0; eid < 4; ++eid) {
             if (A_valid & (1u << eid)) {
-                Atrans[eid] = *reinterpret_cast<const float*>(A_lid + T.wid * 4 + eid * T.K);
+                Atrans[eid] = *reinterpret_cast<const float*>(A_lid + SL.wid * 4 + eid * SL.K);
             }
             if (B_valid & (1u << eid)) {
-                Btrans[eid] = *reinterpret_cast<const float*>(B_lid + T.wid * 4 * T.N + eid * T.N);
+                Btrans[eid] = *reinterpret_cast<const float*>(B_lid + SL.wid * 4 * SL.N + eid * SL.N);
             }
         }
         // 计算 C 的子区域
-        compute_tile_crr(Creg, Asmem, Bsmem, 36, 32, T.wcols, T.lrid, T.lcid);
+        compute_tile_crr(Creg, Asmem, Bsmem, 36, 32, SL.wcols, SL.lrid, SL.lcid);
         // 将预取数据写入到共享内存
         Asmem += (2 * (kth & 1) - 1) * (128 + 32);
         Bsmem += (2 * (kth & 1) - 1) * 128;
-        *reinterpret_cast<float4*>(Asmem + T.lid % 4 * 36 + T.lid / 4 * 4) = *reinterpret_cast<float4*>(Atrans);
-        Bsmem[T.lid + 0 * 32] = Btrans[0];
-        Bsmem[T.lid + 1 * 32] = Btrans[1];
-        Bsmem[T.lid + 2 * 32] = Btrans[2];
-        Bsmem[T.lid + 3 * 32] = Btrans[3];
+        *reinterpret_cast<float4*>(Asmem + SL.lid % 4 * 36 + SL.lid / 4 * 4) = *reinterpret_cast<float4*>(Atrans);
+        Bsmem[SL.lid + 0 * 32] = Btrans[0];
+        Bsmem[SL.lid + 1 * 32] = Btrans[1];
+        Bsmem[SL.lid + 2 * 32] = Btrans[2];
+        Bsmem[SL.lid + 3 * 32] = Btrans[3];
         __syncthreads();
         A_lid += 16;
-        B_lid += 16 * T.N;
+        B_lid += 16 * SL.N;
     }
     // 计算 C 的子区域
-    compute_tile_crr(Creg, Asmem, Bsmem, 36, 32, T.wcols, T.lrid, T.lcid);
+    compute_tile_crr(Creg, Asmem, Bsmem, 36, 32, SL.wcols, SL.lrid, SL.lcid);
 
     // 应用 alpha 缩放
     #pragma unroll
@@ -252,71 +252,71 @@ void compute_block_rrr(
 
 __device__ __forceinline__
 void compute_block_rcr(
-    float Creg[2][4][4], float *smem_buf, const float *A, const float *B, const float alpha, const TileIndexSliceK &T
+    float Creg[2][4][4], float *smem_buf, const float *A, const float *B, const float alpha, const ShapeLayoutSliceK &SL
 ) {
-    float *Asmem = reinterpret_cast<float*>(smem_buf + 1024 * T.wid);
-    float *Bsmem = reinterpret_cast<float*>(smem_buf + 1024 * T.wid + (128 + 32) * 2);
+    float *Asmem = reinterpret_cast<float*>(smem_buf + 1024 * SL.wid);
+    float *Bsmem = reinterpret_cast<float*>(smem_buf + 1024 * SL.wid + (128 + 32) * 2);
 
-    // [NEXT] A_lid + eid * T.K + kth * 16 + slice_idx * 4
-    // [NEXT] B_lid + eid * T.K + kth * 16 + slice_idx * 4
-    const float *A_lid = A + (blockIdx.z * T.aS + T.brid * 32 * T.K) + (T.lid / 4 * 4 * T.K + T.lid % 4);
-    const float *B_lid = B + (blockIdx.z * T.bS + T.bcid * 32 * T.K) + (T.lid / 4 * 4 * T.K + T.lid % 4);
+    // [NEXT] A_lid + eid * SL.K + kth * 16 + slice_idx * 4
+    // [NEXT] B_lid + eid * SL.K + kth * 16 + slice_idx * 4
+    const float *A_lid = A + (blockIdx.z * SL.aS + SL.brid * 32 * SL.K) + (SL.lid / 4 * 4 * SL.K + SL.lid % 4);
+    const float *B_lid = B + (blockIdx.z * SL.bS + SL.bcid * 32 * SL.K) + (SL.lid / 4 * 4 * SL.K + SL.lid % 4);
     float Atrans[4] = {}, Btrans[4] = {};
 
     // valid[eid] 标识 eid 数据是否为有效数据，有效元素指未越界的数据
     uint32_t A_valid = 0U, B_valid = 0U;
     #pragma unroll
     for (uint32_t eid = 0; eid < 4; ++eid) {
-        if (T.brid * 32 + T.lid / 4 * 4 + eid < T.M) A_valid |= (1u << eid);
-        if (T.bcid * 32 + T.lid / 4 * 4 + eid < T.N) B_valid |= (1u << eid);
+        if (SL.brid * 32 + SL.lid / 4 * 4 + eid < SL.M) A_valid |= (1u << eid);
+        if (SL.bcid * 32 + SL.lid / 4 * 4 + eid < SL.N) B_valid |= (1u << eid);
     }
 
     // 一次完整的 slice_num = 4 迭代在 K 的维度上读取 slice_num * slice_len = 4 * 4 = 16 的数据，首先处理刚开始的可能情况
-    uint32_t kstart = T.K - ((T.K + 15) / 16 - 1) * 16;  // [1, 2, 3, ..., 16]
+    uint32_t kstart = SL.K - ((SL.K + 15) / 16 - 1) * 16;  // [1, 2, 3, ..., 16]
     // 预取可能不足 16 个的元素
     #pragma unroll
     for (uint32_t eid = 0; eid < 4; ++eid) {
-        if ((A_valid & (1u << eid)) && (T.wid * 4 + T.lid % 4 < kstart)) {
-            Atrans[eid] = *reinterpret_cast<const float*>(A_lid + T.wid * 4 + eid * T.K);
+        if ((A_valid & (1u << eid)) && (SL.wid * 4 + SL.lid % 4 < kstart)) {
+            Atrans[eid] = *reinterpret_cast<const float*>(A_lid + SL.wid * 4 + eid * SL.K);
         }
-        if ((B_valid & (1u << eid)) && (T.wid * 4 + T.lid % 4 < kstart)) {
-            Btrans[eid] = *reinterpret_cast<const float*>(B_lid + T.wid * 4 + eid * T.K);
+        if ((B_valid & (1u << eid)) && (SL.wid * 4 + SL.lid % 4 < kstart)) {
+            Btrans[eid] = *reinterpret_cast<const float*>(B_lid + SL.wid * 4 + eid * SL.K);
         }
     }
 
     // 将预取数据写入到共享内存
     // 此处采用 32 + 4 是因为使用 4 做偏移时，保证可使用 float4 向量化读写共享内存，且使用 float4 写入时不存在 bank 冲突
-    *reinterpret_cast<float4*>(Asmem + T.lid % 4 * 36 + T.lid / 4 * 4) = *reinterpret_cast<float4*>(Atrans);
-    *reinterpret_cast<float4*>(Bsmem + T.lid % 4 * 36 + T.lid / 4 * 4) = *reinterpret_cast<float4*>(Btrans);
+    *reinterpret_cast<float4*>(Asmem + SL.lid % 4 * 36 + SL.lid / 4 * 4) = *reinterpret_cast<float4*>(Atrans);
+    *reinterpret_cast<float4*>(Bsmem + SL.lid % 4 * 36 + SL.lid / 4 * 4) = *reinterpret_cast<float4*>(Btrans);
     __syncthreads();
     A_lid += kstart;
     B_lid += kstart;
 
     // 在 K 的维度轴上进行循环迭代，计算矩阵 C 的子区域
-    for (uint32_t kth = 1; kth < (T.K + 15) / 16; ++kth) {
+    for (uint32_t kth = 1; kth < (SL.K + 15) / 16; ++kth) {
         // 预取 kth 的数据
         #pragma unroll
         for (uint32_t eid = 0; eid < 4; ++eid) {
             if (A_valid & (1u << eid)) {
-                Atrans[eid] = *reinterpret_cast<const float*>(A_lid + T.wid * 4 + eid * T.K);
+                Atrans[eid] = *reinterpret_cast<const float*>(A_lid + SL.wid * 4 + eid * SL.K);
             }
             if (B_valid & (1u << eid)) {
-                Btrans[eid] = *reinterpret_cast<const float*>(B_lid + T.wid * 4 + eid * T.K);
+                Btrans[eid] = *reinterpret_cast<const float*>(B_lid + SL.wid * 4 + eid * SL.K);
             }
         }
         // 计算 C 的子区域
-        compute_tile_crr(Creg, Asmem, Bsmem, 36, 36, T.wcols, T.lrid, T.lcid);
+        compute_tile_crr(Creg, Asmem, Bsmem, 36, 36, SL.wcols, SL.lrid, SL.lcid);
         // 将预取数据写入到共享内存
         Asmem += (2 * (kth & 1) - 1) * (128 + 32);
         Bsmem += (2 * (kth & 1) - 1) * (128 + 32);
-        *reinterpret_cast<float4*>(Asmem + T.lid % 4 * 36 + T.lid / 4 * 4) = *reinterpret_cast<float4*>(Atrans);
-        *reinterpret_cast<float4*>(Bsmem + T.lid % 4 * 36 + T.lid / 4 * 4) = *reinterpret_cast<float4*>(Btrans);
+        *reinterpret_cast<float4*>(Asmem + SL.lid % 4 * 36 + SL.lid / 4 * 4) = *reinterpret_cast<float4*>(Atrans);
+        *reinterpret_cast<float4*>(Bsmem + SL.lid % 4 * 36 + SL.lid / 4 * 4) = *reinterpret_cast<float4*>(Btrans);
         __syncthreads();
         A_lid += 16;
         B_lid += 16;
     }
     // 计算 C 的子区域
-    compute_tile_crr(Creg, Asmem, Bsmem, 36, 36, T.wcols, T.lrid, T.lcid);
+    compute_tile_crr(Creg, Asmem, Bsmem, 36, 36, SL.wcols, SL.lrid, SL.lcid);
 
     // 应用 alpha 缩放
     #pragma unroll
@@ -333,82 +333,82 @@ void compute_block_rcr(
 
 __device__ __forceinline__
 void compute_block_crr(
-    float Creg[2][4][4], float *smem_buf, const float *A, const float *B, const float alpha, const TileIndexSliceK &T
+    float Creg[2][4][4], float *smem_buf, const float *A, const float *B, const float alpha, const ShapeLayoutSliceK &SL
 ) {
-    float *Asmem = reinterpret_cast<float*>(smem_buf + 1024 * T.wid);
-    float *Bsmem = reinterpret_cast<float*>(smem_buf + 1024 * T.wid + 128 * 2);
+    float *Asmem = reinterpret_cast<float*>(smem_buf + 1024 * SL.wid);
+    float *Bsmem = reinterpret_cast<float*>(smem_buf + 1024 * SL.wid + 128 * 2);
 
-    // [NEXT] A_lid + eid * T.M + kth * 16 * T.M + slice_idx * 4 * T.M
-    // [NEXT] B_lid + eid * T.N + kth * 16 * T.N + slice_idx * 4 * T.N
-    const float *A_lid = A + (blockIdx.z * T.aS + T.brid * 32) + T.lid;
-    const float *B_lid = B + (blockIdx.z * T.bS + T.bcid * 32) + T.lid;
+    // [NEXT] A_lid + eid * SL.M + kth * 16 * SL.M + slice_idx * 4 * SL.M
+    // [NEXT] B_lid + eid * SL.N + kth * 16 * SL.N + slice_idx * 4 * SL.N
+    const float *A_lid = A + (blockIdx.z * SL.aS + SL.brid * 32) + SL.lid;
+    const float *B_lid = B + (blockIdx.z * SL.bS + SL.bcid * 32) + SL.lid;
     float Atrans[4] = {}, Btrans[4] = {};
 
     // valid[eid] 标识 eid 数据是否为有效数据，有效元素指未越界的数据
     uint32_t A_valid = 0U, B_valid = 0U;
     #pragma unroll
     for (uint32_t eid = 0; eid < 4; ++eid) {
-        if (T.brid * 32 + T.lid < T.M) A_valid |= (1u << eid);
-        if (T.bcid * 32 + T.lid < T.N) B_valid |= (1u << eid);
+        if (SL.brid * 32 + SL.lid < SL.M) A_valid |= (1u << eid);
+        if (SL.bcid * 32 + SL.lid < SL.N) B_valid |= (1u << eid);
     }
 
     // 一次完整的 slice_num = 4 迭代在 K 的维度上读取 slice_num * slice_len = 4 * 4 = 16 的数据，首先处理刚开始的可能情况
-    uint32_t kstart = T.K - ((T.K + 15) / 16 - 1) * 16;  // [1, 2, 3, ..., 16]
+    uint32_t kstart = SL.K - ((SL.K + 15) / 16 - 1) * 16;  // [1, 2, 3, ..., 16]
     // 预取可能不足 16 个的元素
     #pragma unroll
     for (uint32_t eid = 0; eid < 4; ++eid) {
-        if ((A_valid & (1u << eid)) && (T.wid * 4 + eid < kstart)) {
-            Atrans[eid] = *reinterpret_cast<const float*>(A_lid + T.wid * 4 * T.M + eid * T.M);
+        if ((A_valid & (1u << eid)) && (SL.wid * 4 + eid < kstart)) {
+            Atrans[eid] = *reinterpret_cast<const float*>(A_lid + SL.wid * 4 * SL.M + eid * SL.M);
         }
-        if ((B_valid & (1u << eid)) && (T.wid * 4 + eid < kstart)) {
-            Btrans[eid] = *reinterpret_cast<const float*>(B_lid + T.wid * 4 * T.N + eid * T.N);
+        if ((B_valid & (1u << eid)) && (SL.wid * 4 + eid < kstart)) {
+            Btrans[eid] = *reinterpret_cast<const float*>(B_lid + SL.wid * 4 * SL.N + eid * SL.N);
         }
     }
 
     // 将预取数据写入到共享内存
-    Asmem[T.lid + 0 * 32] = Atrans[0];
-    Asmem[T.lid + 1 * 32] = Atrans[1];
-    Asmem[T.lid + 2 * 32] = Atrans[2];
-    Asmem[T.lid + 3 * 32] = Atrans[3];
-    Bsmem[T.lid + 0 * 32] = Btrans[0];
-    Bsmem[T.lid + 1 * 32] = Btrans[1];
-    Bsmem[T.lid + 2 * 32] = Btrans[2];
-    Bsmem[T.lid + 3 * 32] = Btrans[3];
+    Asmem[SL.lid + 0 * 32] = Atrans[0];
+    Asmem[SL.lid + 1 * 32] = Atrans[1];
+    Asmem[SL.lid + 2 * 32] = Atrans[2];
+    Asmem[SL.lid + 3 * 32] = Atrans[3];
+    Bsmem[SL.lid + 0 * 32] = Btrans[0];
+    Bsmem[SL.lid + 1 * 32] = Btrans[1];
+    Bsmem[SL.lid + 2 * 32] = Btrans[2];
+    Bsmem[SL.lid + 3 * 32] = Btrans[3];
     __syncthreads();
-    A_lid += kstart * T.M;
-    B_lid += kstart * T.N;
+    A_lid += kstart * SL.M;
+    B_lid += kstart * SL.N;
 
     // 在 K 的维度轴上进行循环迭代，计算矩阵 C 的子区域
-    for (uint32_t kth = 1; kth < (T.K + 15) / 16; ++kth) {
+    for (uint32_t kth = 1; kth < (SL.K + 15) / 16; ++kth) {
         // 预取 kth 的数据
         #pragma unroll
         for (uint32_t eid = 0; eid < 4; ++eid) {
             if (A_valid & (1u << eid)) {
-                Atrans[eid] = *reinterpret_cast<const float*>(A_lid + T.wid * 4 * T.M + eid * T.M);
+                Atrans[eid] = *reinterpret_cast<const float*>(A_lid + SL.wid * 4 * SL.M + eid * SL.M);
             }
             if (B_valid & (1u << eid)) {
-                Btrans[eid] = *reinterpret_cast<const float*>(B_lid + T.wid * 4 * T.N + eid * T.N);
+                Btrans[eid] = *reinterpret_cast<const float*>(B_lid + SL.wid * 4 * SL.N + eid * SL.N);
             }
         }
         // 计算 C 的子区域
-        compute_tile_crr(Creg, Asmem, Bsmem, 32, 32, T.wcols, T.lrid, T.lcid);
+        compute_tile_crr(Creg, Asmem, Bsmem, 32, 32, SL.wcols, SL.lrid, SL.lcid);
         // 将预取数据写入到共享内存
         Asmem += (2 * (kth & 1) - 1) * 128;
         Bsmem += (2 * (kth & 1) - 1) * 128;
-        Asmem[T.lid + 0 * 32] = Atrans[0];
-        Asmem[T.lid + 1 * 32] = Atrans[1];
-        Asmem[T.lid + 2 * 32] = Atrans[2];
-        Asmem[T.lid + 3 * 32] = Atrans[3];
-        Bsmem[T.lid + 0 * 32] = Btrans[0];
-        Bsmem[T.lid + 1 * 32] = Btrans[1];
-        Bsmem[T.lid + 2 * 32] = Btrans[2];
-        Bsmem[T.lid + 3 * 32] = Btrans[3];
+        Asmem[SL.lid + 0 * 32] = Atrans[0];
+        Asmem[SL.lid + 1 * 32] = Atrans[1];
+        Asmem[SL.lid + 2 * 32] = Atrans[2];
+        Asmem[SL.lid + 3 * 32] = Atrans[3];
+        Bsmem[SL.lid + 0 * 32] = Btrans[0];
+        Bsmem[SL.lid + 1 * 32] = Btrans[1];
+        Bsmem[SL.lid + 2 * 32] = Btrans[2];
+        Bsmem[SL.lid + 3 * 32] = Btrans[3];
         __syncthreads();
-        A_lid += 16 * T.M;
-        B_lid += 16 * T.N;
+        A_lid += 16 * SL.M;
+        B_lid += 16 * SL.N;
     }
     // 计算 C 的子区域
-    compute_tile_crr(Creg, Asmem, Bsmem, 32, 32, T.wcols, T.lrid, T.lcid);
+    compute_tile_crr(Creg, Asmem, Bsmem, 32, 32, SL.wcols, SL.lrid, SL.lcid);
 
     // 应用 alpha 缩放
     #pragma unroll
@@ -425,78 +425,78 @@ void compute_block_crr(
 
 __device__ __forceinline__
 void compute_block_ccr(
-    float Creg[2][4][4], float *smem_buf, const float *A, const float *B, const float alpha, const TileIndexSliceK &T
+    float Creg[2][4][4], float *smem_buf, const float *A, const float *B, const float alpha, const ShapeLayoutSliceK &SL
 ) {
-    float *Asmem = reinterpret_cast<float*>(smem_buf + 1024 * T.wid);
-    float *Bsmem = reinterpret_cast<float*>(smem_buf + 1024 * T.wid + 128 * 2);
+    float *Asmem = reinterpret_cast<float*>(smem_buf + 1024 * SL.wid);
+    float *Bsmem = reinterpret_cast<float*>(smem_buf + 1024 * SL.wid + 128 * 2);
 
-    // [NEXT] A_lid + eid * T.M + kth * 16 * T.M + slice_idx * 4 * T.M
-    // [NEXT] B_lid + eid * T.K + kth * 16 + slice_idx * 4
-    const float *A_lid = A + (blockIdx.z * T.aS + T.brid * 32) + T.lid;
-    const float *B_lid = B + (blockIdx.z * T.bS + T.bcid * 32 * T.K) + (T.lid / 4 * 4 * T.K + T.lid % 4);
+    // [NEXT] A_lid + eid * SL.M + kth * 16 * SL.M + slice_idx * 4 * SL.M
+    // [NEXT] B_lid + eid * SL.K + kth * 16 + slice_idx * 4
+    const float *A_lid = A + (blockIdx.z * SL.aS + SL.brid * 32) + SL.lid;
+    const float *B_lid = B + (blockIdx.z * SL.bS + SL.bcid * 32 * SL.K) + (SL.lid / 4 * 4 * SL.K + SL.lid % 4);
     float Atrans[4] = {}, Btrans[4] = {};
 
     // valid[eid] 标识 eid 数据是否为有效数据，有效元素指未越界的数据
     uint32_t A_valid = 0U, B_valid = 0U;
     #pragma unroll
     for (uint32_t eid = 0; eid < 4; ++eid) {
-        if (T.brid * 32 + T.lid < T.M)               A_valid |= (1u << eid);
-        if (T.bcid * 32 + T.lid / 4 * 4 + eid < T.N) B_valid |= (1u << eid);
+        if (SL.brid * 32 + SL.lid < SL.M)               A_valid |= (1u << eid);
+        if (SL.bcid * 32 + SL.lid / 4 * 4 + eid < SL.N) B_valid |= (1u << eid);
     }
 
     // 一次完整的 slice_num = 4 迭代在 K 的维度上读取 slice_num * slice_len = 4 * 4 = 16 的数据，首先处理刚开始的可能情况
-    uint32_t kstart = T.K - ((T.K + 15) / 16 - 1) * 16;  // [1, 2, 3, ..., 16]
+    uint32_t kstart = SL.K - ((SL.K + 15) / 16 - 1) * 16;  // [1, 2, 3, ..., 16]
     // 预取可能不足 16 个的元素
     #pragma unroll
     for (uint32_t eid = 0; eid < 4; ++eid) {
-        if ((A_valid & (1u << eid)) && (T.wid * 4 + eid < kstart)) {
-            Atrans[eid] = *reinterpret_cast<const float*>(A_lid + T.wid * 4 * T.M + eid * T.M);
+        if ((A_valid & (1u << eid)) && (SL.wid * 4 + eid < kstart)) {
+            Atrans[eid] = *reinterpret_cast<const float*>(A_lid + SL.wid * 4 * SL.M + eid * SL.M);
         }
-        if ((B_valid & (1u << eid)) && (T.wid * 4 + T.lid % 4 < kstart)) {
-            Btrans[eid] = *reinterpret_cast<const float*>(B_lid + T.wid * 4 + eid * T.K);
+        if ((B_valid & (1u << eid)) && (SL.wid * 4 + SL.lid % 4 < kstart)) {
+            Btrans[eid] = *reinterpret_cast<const float*>(B_lid + SL.wid * 4 + eid * SL.K);
         }
     }
 
     // 将预取数据写入到共享内存
-    Asmem[T.lid + 0 * 32] = Atrans[0];
-    Asmem[T.lid + 1 * 32] = Atrans[1];
-    Asmem[T.lid + 2 * 32] = Atrans[2];
-    Asmem[T.lid + 3 * 32] = Atrans[3];
+    Asmem[SL.lid + 0 * 32] = Atrans[0];
+    Asmem[SL.lid + 1 * 32] = Atrans[1];
+    Asmem[SL.lid + 2 * 32] = Atrans[2];
+    Asmem[SL.lid + 3 * 32] = Atrans[3];
     // 此处采用 32 + 4 是因为使用 4 做偏移时，保证可使用 float4 向量化读写共享内存，且使用 float4 写入时不存在 bank 冲突
-    *reinterpret_cast<float4*>(Bsmem + T.lid % 4 * 36 + T.lid / 4 * 4) = *reinterpret_cast<float4*>(Btrans);
+    *reinterpret_cast<float4*>(Bsmem + SL.lid % 4 * 36 + SL.lid / 4 * 4) = *reinterpret_cast<float4*>(Btrans);
     __syncthreads();
-    A_lid += kstart * T.M;
+    A_lid += kstart * SL.M;
     B_lid += kstart;
 
     // 在 K 的维度轴上进行循环迭代，计算矩阵 C 的子区域
-    for (uint32_t kth = 1; kth < (T.K + 15) / 16; ++kth) {
+    for (uint32_t kth = 1; kth < (SL.K + 15) / 16; ++kth) {
         // 预取 kth 的数据
         #pragma unroll
         for (uint32_t eid = 0; eid < 4; ++eid) {
             if (A_valid & (1u << eid)) {
-                Atrans[eid] = *reinterpret_cast<const float*>(A_lid + T.wid * 4 * T.M + eid * T.M);
+                Atrans[eid] = *reinterpret_cast<const float*>(A_lid + SL.wid * 4 * SL.M + eid * SL.M);
             }
             if (B_valid & (1u << eid)) {
-                Btrans[eid] = *reinterpret_cast<const float*>(B_lid + T.wid * 4 + eid * T.K);
+                Btrans[eid] = *reinterpret_cast<const float*>(B_lid + SL.wid * 4 + eid * SL.K);
             }
         }
         // 计算 C 的子区域
-        compute_tile_crr(Creg, Asmem, Bsmem, 32, 36, T.wcols, T.lrid, T.lcid);
+        compute_tile_crr(Creg, Asmem, Bsmem, 32, 36, SL.wcols, SL.lrid, SL.lcid);
         // 将预取数据写入到共享内存
         Asmem += (2 * (kth & 1) - 1) * 128;
         Bsmem += (2 * (kth & 1) - 1) * (128 + 32);
-        Asmem[T.lid + 0 * 32] = Atrans[0];
-        Asmem[T.lid + 1 * 32] = Atrans[1];
-        Asmem[T.lid + 2 * 32] = Atrans[2];
-        Asmem[T.lid + 3 * 32] = Atrans[3];
+        Asmem[SL.lid + 0 * 32] = Atrans[0];
+        Asmem[SL.lid + 1 * 32] = Atrans[1];
+        Asmem[SL.lid + 2 * 32] = Atrans[2];
+        Asmem[SL.lid + 3 * 32] = Atrans[3];
         // 此处采用 32 + 4 是因为使用 4 做偏移时，保证可使用 float4 向量化读写共享内存，且使用 float4 写入时不存在 bank 冲突
-        *reinterpret_cast<float4*>(Bsmem + T.lid % 4 * 36 + T.lid / 4 * 4) = *reinterpret_cast<float4*>(Btrans);
+        *reinterpret_cast<float4*>(Bsmem + SL.lid % 4 * 36 + SL.lid / 4 * 4) = *reinterpret_cast<float4*>(Btrans);
         __syncthreads();
-        A_lid += 16 * T.M;
+        A_lid += 16 * SL.M;
         B_lid += 16;
     }
     // 计算 C 的子区域
-    compute_tile_crr(Creg, Asmem, Bsmem, 32, 36, T.wcols, T.lrid, T.lcid);
+    compute_tile_crr(Creg, Asmem, Bsmem, 32, 36, SL.wcols, SL.lrid, SL.lcid);
 
     // 应用 alpha 缩放
     #pragma unroll
@@ -516,10 +516,10 @@ __global__ void sgemm_rrr_kernel(
     const uint32_t M, const uint32_t N, const uint32_t K, const uint32_t aS, const uint32_t bS, const uint32_t cS
 ) {
     float *smem_buf = buffer::SharedMemory<float, 1024 * 4>().pointer();
-    TileIndexSliceK T(M, N, K, aS, bS, cS);
+    ShapeLayoutSliceK SL(M, N, K, aS, bS, cS);
     float Creg[2][4][4] = {};
-    compute_block_rrr(Creg, smem_buf, A, B, alpha, T);
-    store_result_smem_rr(Creg, smem_buf, C, T.M, T.N, T.cS, T.brid, T.bcid, T.tid, T.wid, T.lid, T.wcols, T.lrid, T.lcid);
+    compute_block_rrr(Creg, smem_buf, A, B, alpha, SL);
+    store_result_smem_rr(Creg, smem_buf, C, SL.M, SL.N, SL.cS, SL.brid, SL.bcid, SL.tid, SL.wid, SL.lid, SL.wcols, SL.lrid, SL.lcid);
 }
 
 __global__ void sgemm_rrc_kernel(
@@ -527,10 +527,10 @@ __global__ void sgemm_rrc_kernel(
     const uint32_t M, const uint32_t N, const uint32_t K, const uint32_t aS, const uint32_t bS, const uint32_t cS
 ) {
     float *smem_buf = buffer::SharedMemory<float, 1024 * 4>().pointer();
-    TileIndexSliceK T(M, N, K, aS, bS, cS);
+    ShapeLayoutSliceK SL(M, N, K, aS, bS, cS);
     float Creg[2][4][4] = {};
-    compute_block_rrr(Creg, smem_buf, A, B, alpha, T);
-    store_result_smem_rc(Creg, smem_buf, C, T.M, T.N, T.cS, T.brid, T.bcid, T.tid, T.wid, T.lid, T.wcols, T.lrid, T.lcid);
+    compute_block_rrr(Creg, smem_buf, A, B, alpha, SL);
+    store_result_smem_rc(Creg, smem_buf, C, SL.M, SL.N, SL.cS, SL.brid, SL.bcid, SL.tid, SL.wid, SL.lid, SL.wcols, SL.lrid, SL.lcid);
 }
 
 __global__ void sgemm_rcr_kernel(
@@ -538,10 +538,10 @@ __global__ void sgemm_rcr_kernel(
     const uint32_t M, const uint32_t N, const uint32_t K, const uint32_t aS, const uint32_t bS, const uint32_t cS
 ) {
     float *smem_buf = buffer::SharedMemory<float, 1024 * 4>().pointer();
-    TileIndexSliceK T(M, N, K, aS, bS, cS);
+    ShapeLayoutSliceK SL(M, N, K, aS, bS, cS);
     float Creg[2][4][4] = {};
-    compute_block_rcr(Creg, smem_buf, A, B, alpha, T);
-    store_result_smem_rr(Creg, smem_buf, C, T.M, T.N, T.cS, T.brid, T.bcid, T.tid, T.wid, T.lid, T.wcols, T.lrid, T.lcid);
+    compute_block_rcr(Creg, smem_buf, A, B, alpha, SL);
+    store_result_smem_rr(Creg, smem_buf, C, SL.M, SL.N, SL.cS, SL.brid, SL.bcid, SL.tid, SL.wid, SL.lid, SL.wcols, SL.lrid, SL.lcid);
 }
 
 __global__ void sgemm_rcc_kernel(
@@ -549,10 +549,10 @@ __global__ void sgemm_rcc_kernel(
     const uint32_t M, const uint32_t N, const uint32_t K, const uint32_t aS, const uint32_t bS, const uint32_t cS
 ) {
     float *smem_buf = buffer::SharedMemory<float, 1024 * 4>().pointer();
-    TileIndexSliceK T(M, N, K, aS, bS, cS);
+    ShapeLayoutSliceK SL(M, N, K, aS, bS, cS);
     float Creg[2][4][4] = {};
-    compute_block_rcr(Creg, smem_buf, A, B, alpha, T);
-    store_result_smem_rc(Creg, smem_buf, C, T.M, T.N, T.cS, T.brid, T.bcid, T.tid, T.wid, T.lid, T.wcols, T.lrid, T.lcid);
+    compute_block_rcr(Creg, smem_buf, A, B, alpha, SL);
+    store_result_smem_rc(Creg, smem_buf, C, SL.M, SL.N, SL.cS, SL.brid, SL.bcid, SL.tid, SL.wid, SL.lid, SL.wcols, SL.lrid, SL.lcid);
 }
 
 __global__ void sgemm_crr_kernel(
@@ -560,10 +560,10 @@ __global__ void sgemm_crr_kernel(
     const uint32_t M, const uint32_t N, const uint32_t K, const uint32_t aS, const uint32_t bS, const uint32_t cS
 ) {
     float *smem_buf = buffer::SharedMemory<float, 1024 * 4>().pointer();
-    TileIndexSliceK T(M, N, K, aS, bS, cS);
+    ShapeLayoutSliceK SL(M, N, K, aS, bS, cS);
     float Creg[2][4][4] = {};
-    compute_block_crr(Creg, smem_buf, A, B, alpha, T);
-    store_result_smem_rr(Creg, smem_buf, C, T.M, T.N, T.cS, T.brid, T.bcid, T.tid, T.wid, T.lid, T.wcols, T.lrid, T.lcid);
+    compute_block_crr(Creg, smem_buf, A, B, alpha, SL);
+    store_result_smem_rr(Creg, smem_buf, C, SL.M, SL.N, SL.cS, SL.brid, SL.bcid, SL.tid, SL.wid, SL.lid, SL.wcols, SL.lrid, SL.lcid);
 }
 
 __global__ void sgemm_crc_kernel(
@@ -571,10 +571,10 @@ __global__ void sgemm_crc_kernel(
     const uint32_t M, const uint32_t N, const uint32_t K, const uint32_t aS, const uint32_t bS, const uint32_t cS
 ) {
     float *smem_buf = buffer::SharedMemory<float, 1024 * 4>().pointer();
-    TileIndexSliceK T(M, N, K, aS, bS, cS);
+    ShapeLayoutSliceK SL(M, N, K, aS, bS, cS);
     float Creg[2][4][4] = {};
-    compute_block_crr(Creg, smem_buf, A, B, alpha, T);
-    store_result_smem_rc(Creg, smem_buf, C, T.M, T.N, T.cS, T.brid, T.bcid, T.tid, T.wid, T.lid, T.wcols, T.lrid, T.lcid);
+    compute_block_crr(Creg, smem_buf, A, B, alpha, SL);
+    store_result_smem_rc(Creg, smem_buf, C, SL.M, SL.N, SL.cS, SL.brid, SL.bcid, SL.tid, SL.wid, SL.lid, SL.wcols, SL.lrid, SL.lcid);
 }
 
 __global__ void sgemm_ccr_kernel(
@@ -582,10 +582,10 @@ __global__ void sgemm_ccr_kernel(
     const uint32_t M, const uint32_t N, const uint32_t K, const uint32_t aS, const uint32_t bS, const uint32_t cS
 ) {
     float *smem_buf = buffer::SharedMemory<float, 1024 * 4>().pointer();
-    TileIndexSliceK T(M, N, K, aS, bS, cS);
+    ShapeLayoutSliceK SL(M, N, K, aS, bS, cS);
     float Creg[2][4][4] = {};
-    compute_block_ccr(Creg, smem_buf, A, B, alpha, T);
-    store_result_smem_rr(Creg, smem_buf, C, T.M, T.N, T.cS, T.brid, T.bcid, T.tid, T.wid, T.lid, T.wcols, T.lrid, T.lcid);
+    compute_block_ccr(Creg, smem_buf, A, B, alpha, SL);
+    store_result_smem_rr(Creg, smem_buf, C, SL.M, SL.N, SL.cS, SL.brid, SL.bcid, SL.tid, SL.wid, SL.lid, SL.wcols, SL.lrid, SL.lcid);
 }
 
 __global__ void sgemm_ccc_kernel(
@@ -593,10 +593,10 @@ __global__ void sgemm_ccc_kernel(
     const uint32_t M, const uint32_t N, const uint32_t K, const uint32_t aS, const uint32_t bS, const uint32_t cS
 ) {
     float *smem_buf = buffer::SharedMemory<float, 1024 * 4>().pointer();
-    TileIndexSliceK T(M, N, K, aS, bS, cS);
+    ShapeLayoutSliceK SL(M, N, K, aS, bS, cS);
     float Creg[2][4][4] = {};
-    compute_block_ccr(Creg, smem_buf, A, B, alpha, T);
-    store_result_smem_rc(Creg, smem_buf, C, T.M, T.N, T.cS, T.brid, T.bcid, T.tid, T.wid, T.lid, T.wcols, T.lrid, T.lcid);
+    compute_block_ccr(Creg, smem_buf, A, B, alpha, SL);
+    store_result_smem_rc(Creg, smem_buf, C, SL.M, SL.N, SL.cS, SL.brid, SL.bcid, SL.tid, SL.wid, SL.lid, SL.wcols, SL.lrid, SL.lcid);
 }
 
 __host__ void sgemm_cuda(
