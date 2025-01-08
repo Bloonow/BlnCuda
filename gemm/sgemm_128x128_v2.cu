@@ -27,8 +27,8 @@ void sgemm_rrr_128x128x8_kernel(
     // B_tile 需要一块连续的 4 KiB * 2 = 2^12 B * 2 的缓冲区，故可以使用 (uint32_t&) B_smem ^= 0x1000; 进行切换
     // 如此，共享内存双缓冲的切换，只需要使用一条异或指令即可
     float *smem_buf = buffer::SharedMemory<float, 128 * 8 * 4 + 128 * 8 * 2>().pointer();
-    float *A_smem = reinterpret_cast<float*>(smem_buf);
-    float *B_smem = reinterpret_cast<float*>(smem_buf + 128 * 8 * 4);
+    float *A_smem = smem_buf;
+    float *B_smem = smem_buf + 128 * 8 * 4;
 
     // A, B Thread Tile on register, C Thread Tile on register (double buffer)
     float A_frag[2][8], B_frag[2][8], C_frag[8][8] = { 0 };
@@ -36,8 +36,8 @@ void sgemm_rrr_128x128x8_kernel(
     // A_tile and B_tile ldg pointer, Threadblock arranged as row-major
     // [NEXT] = A_ldg_ptr + K_tile;      [eid] = A_ldg_ptr + eid * K;
     // [NEXT] = B_ldg_ptr + K_tile * N;  [eid] = B_ldg_ptr + eid * 32;
-    const float *A_ldg_ptr = reinterpret_cast<const float*>(A + blockIdx.y * 128 * K + threadIdx.x / 8 * 4 * K + threadIdx.x % 8);
-    const float *B_ldg_ptr = reinterpret_cast<const float*>(B + blockIdx.x * 128 + threadIdx.x / 32 * N + threadIdx.x % 32);
+    const float *A_ldg_ptr = A + blockIdx.y * 128 * K + threadIdx.x / 8 * 4 * K + threadIdx.x % 8;
+    const float *B_ldg_ptr = B + blockIdx.x * 128 + threadIdx.x / 32 * N + threadIdx.x % 32;
 
     // ldg_valid[eid] 标识 eid 数据是否为有效数据，有效元素指未越界的数据，避免 ldg 指令越界
     uint32_t A_ldg_valid = 0, B_ldg_valid = 0;
@@ -208,18 +208,18 @@ void sgemm_rrr_128x128x8_kernel(
 
     // 以行主序的方式写回矩阵 C_tile 的结果，一行一行地写回，并使用共享内存对数据的布局进行重排，以合并访存
     // 因为一个线程持有 C_frag 数据，而这些数据又划分为 sub-partitions 子分区，每次写回一个子分区 C_sub[4][4] 的数据
-    // 在每个线程将 C_sub 写入共享内存时，所使用的地址，共需要 256 * 16 * float 的共享内存空间
+    // 在每个线程将 C_sub 写入共享内存时，共需要 256 * 16 * float 的共享内存空间
     // [rid] = C_sts_addr + rid * 32 * sizeof(float);
     uint32_t C_sts_addr = ptx::smem_addr(smem_buf + warp_id * 32 * 16 + lane_rid * 4 * 32 + lane_cid * 4);
     // 每个线程将共享内存中的数据搬运到全局内存中时，所读取的共享内存的位置 C_lds_ptr 如下
     // 一个 Warp 中的线程负责一个子分区 C_sub_warp[16][32] 的数据，使用 32 个线程搬运 [:][32] 数据，迭代 16 次完成
     // [iter] = C_lds_ptr + iter * 32;
-    const float *C_lds_ptr = reinterpret_cast<const float*>(smem_buf + warp_id * 32 * 16 + lane_id);
+    const float *C_lds_ptr = smem_buf + warp_id * 32 * 16 + lane_id;
     // 每个线程要写回的全局内存中的位置，对于一个 C_sub_warp[16][32] 的数据而言，迭代 iter = 16 次完成
     uint32_t m_idx = blockIdx.y * 128 + warp_id / 2 * 32;
     uint32_t n_idx = blockIdx.x * 128 + warp_id % 2 * 64 + lane_id;
     // [prid][pcid][iter] = C_stg_ptr + prid * 16 * N + pcid * 32 + iter * N;
-    float *C_stg_ptr = reinterpret_cast<float*>(C + m_idx * N + n_idx);
+    float *C_stg_ptr = C + m_idx * N + n_idx;
     // 因为是按行主序的方式写回矩阵 C_tile 的结果，则有效数据行的范围为 [0, 1, 2, ..., M - 1]
     if (m_idx >= M) {
         return;

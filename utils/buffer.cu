@@ -2,20 +2,27 @@
 
 #include <cstdio>
 #include <cuda.h>
+#include <cuda_fp16.h>
 #include <cuComplex.h>
 
 namespace buffer {
     
 template <typename Type, int num_datum> struct SharedMemory;
+template <int num_datum> struct SharedMemory<half, num_datum> {
+    __device__ half *pointer() {
+        __shared__ half __shared_memory__[num_datum];
+        return reinterpret_cast<half*>(__shared_memory__);
+    }
+};
 template <int num_datum> struct SharedMemory<float, num_datum> {
     __device__ float *pointer() {
-        __shared__ __align__(128) float __shared_memory__[num_datum];
+        __shared__ float __shared_memory__[num_datum];
         return reinterpret_cast<float*>(__shared_memory__);
     }
 };
 template <int num_datum> struct SharedMemory<cuComplex, num_datum> {
     __device__ cuComplex *pointer() {
-        __shared__ __align__(128) cuComplex __shared_memory__[num_datum];
+        __shared__ cuComplex __shared_memory__[num_datum];
         return reinterpret_cast<cuComplex*>(__shared_memory__);
     }
 };

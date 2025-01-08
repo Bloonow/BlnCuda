@@ -72,7 +72,7 @@ void store_result_smem_rr(
     const uint32_t wcols, const uint32_t lrid, const uint32_t lcid
 ) {
     // 存在 slice_num 份矩阵 C 子区域的部分结果，需先使用共享内存对其进行归约   
-    float *Csmem = reinterpret_cast<float*>(smem_buf + 1024 * wid);
+    float *Csmem = smem_buf + 1024 * wid;
     // 写回矩阵 C 的子区域，使用 32x32 共享内存搬运 32x32 数据，共需 1 次
     float *C_block = SplitC + (blockIdx.z * split_num * cS) + (split_idx * cS) + (brid * 32 * N + bcid * 32);
 
@@ -83,12 +83,8 @@ void store_result_smem_rr(
     for (uint32_t row = 0; row < 4; ++row) {
         trans1.x = Creg[0][row][0]; trans1.y = Creg[0][row][1]; trans1.z = Creg[0][row][2]; trans1.w = Creg[0][row][3];
         trans2.x = Creg[1][row][0]; trans2.y = Creg[1][row][1]; trans2.z = Creg[1][row][2]; trans2.w = Creg[1][row][3];
-        *reinterpret_cast<float4*>(
-            Csmem + (0 * wcols * 4 + lcid * 4) + (lrid * 4 * 32 + row * 32)
-        ) = trans1;
-        *reinterpret_cast<float4*>(
-            Csmem + (1 * wcols * 4 + lcid * 4) + (lrid * 4 * 32 + row * 32)
-        ) = trans2;
+        *reinterpret_cast<float4*>(Csmem + (0 * wcols * 4 + lcid * 4) + (lrid * 4 * 32 + row * 32)) = trans1;
+        *reinterpret_cast<float4*>(Csmem + (1 * wcols * 4 + lcid * 4) + (lrid * 4 * 32 + row * 32)) = trans2;
     }
     __syncthreads();
     // 在 slice_num 个线程束之上进行归约，函数结束时存在显式 __syncthreads() 同步
@@ -98,9 +94,7 @@ void store_result_smem_rr(
     #pragma unroll
     for (uint32_t gmem_row = 0; gmem_row < 32; gmem_row += 4) {
         if ((brid * 32 + gmem_row + tid / 32 < M) && (bcid * 32 + tid % 32 < N)) {
-            *reinterpret_cast<float*>(
-                C_block + (gmem_row + tid / 32) * N + (tid % 32)
-            ) = *reinterpret_cast<float*>(smem_buf + gmem_row * 32 + tid);
+            *(C_block + (gmem_row + tid / 32) * N + (tid % 32)) = *(smem_buf + gmem_row * 32 + tid);
         }
     }
 }
@@ -113,7 +107,7 @@ void store_result_smem_rc(
     const uint32_t wcols, const uint32_t lrid, const uint32_t lcid
 ) {
     // 存在 slice_num 份矩阵 C 子区域的部分结果，需先使用共享内存对其进行归约   
-    float *Csmem = reinterpret_cast<float*>(smem_buf + 1024 * wid);
+    float *Csmem = smem_buf + 1024 * wid;
     // 写回矩阵 C 的子区域，使用 32x32 共享内存搬运 32x32 数据，共需 1 次
     float *C_block = SplitC + (blockIdx.z * split_num * cS) + (split_idx * cS) + (bcid * 32 * M + brid * 32);
 
@@ -124,12 +118,8 @@ void store_result_smem_rc(
     for (uint32_t column = 0; column < 4; ++column) {
         trans1.x = Creg[0][0][column]; trans1.y = Creg[0][1][column]; trans1.z = Creg[0][2][column]; trans1.w = Creg[0][3][column];
         trans2.x = Creg[1][0][column]; trans2.y = Creg[1][1][column]; trans2.z = Creg[1][2][column]; trans2.w = Creg[1][3][column];
-        *reinterpret_cast<float4*>(
-            Csmem + (0 * wcols * 4 * 32 + lcid * 4 * 32 + column * 32) + (lrid * 4)
-        ) = trans1;
-        *reinterpret_cast<float4*>(
-            Csmem + (1 * wcols * 4 * 32 + lcid * 4 * 32 + column * 32) + (lrid * 4)
-        ) = trans2;
+        *reinterpret_cast<float4*>(Csmem + (0 * wcols * 4 * 32 + lcid * 4 * 32 + column * 32) + (lrid * 4)) = trans1;
+        *reinterpret_cast<float4*>(Csmem + (1 * wcols * 4 * 32 + lcid * 4 * 32 + column * 32) + (lrid * 4)) = trans2;
     }
     __syncthreads();
     // 在 slice_num 个线程束之上进行归约，函数结束时存在显式 __syncthreads() 同步
@@ -140,9 +130,7 @@ void store_result_smem_rc(
     for (uint32_t gmem_column = 0; gmem_column < 32; gmem_column += 4) {
 
         if ((brid * 32 + tid % 32 < M) && (bcid * 32 + gmem_column + tid / 32 < N)) {
-            *reinterpret_cast<float*>(
-                C_block + (gmem_column + tid / 32) * M + (tid % 32)
-            ) = *reinterpret_cast<float*>(smem_buf + gmem_column * 32 + tid);
+            *(C_block + (gmem_column + tid / 32) * M + (tid % 32)) = *(smem_buf + gmem_column * 32 + tid);
         }
     }
 }
@@ -185,8 +173,8 @@ __device__ __forceinline__
 void compute_block_rrr(
     float Creg[2][4][4], float *smem_buf, const float *A, const float *B, const float alpha, const ShapeLayoutSplitK &SL
 ) {
-    float *Asmem = reinterpret_cast<float*>(smem_buf + 1024 * SL.wid);
-    float *Bsmem = reinterpret_cast<float*>(smem_buf + 1024 * SL.wid + (128 + 32) * 2);
+    float *Asmem = smem_buf + 1024 * SL.wid;
+    float *Bsmem = smem_buf + 1024 * SL.wid + (128 + 32) * 2;
 
     // [NEXT] A_lid + eid * SL.K + kth * 16       + slice_idx * 4
     // [NEXT] B_lid + eid * SL.N + kth * 16 * SL.N + slice_idx * 4 * SL.N
@@ -208,10 +196,10 @@ void compute_block_rrr(
     #pragma unroll
     for (uint32_t eid = 0; eid < 4; ++eid) {
         if ((A_valid & (1u << eid)) && (SL.wid * 4 + SL.lid % 4 < kstart)) {
-            Atrans[eid] = *reinterpret_cast<const float*>(A_lid + SL.wid * 4 + eid * SL.K);
+            Atrans[eid] = *(A_lid + SL.wid * 4 + eid * SL.K);
         }
         if ((B_valid & (1u << eid)) && (SL.wid * 4 + eid < kstart)) {
-            Btrans[eid] = *reinterpret_cast<const float*>(B_lid + SL.wid * 4 * SL.N + eid * SL.N);
+            Btrans[eid] = *(B_lid + SL.wid * 4 * SL.N + eid * SL.N);
         }
     }
 
@@ -232,10 +220,10 @@ void compute_block_rrr(
         #pragma unroll
         for (uint32_t eid = 0; eid < 4; ++eid) {
             if (A_valid & (1u << eid)) {
-                Atrans[eid] = *reinterpret_cast<const float*>(A_lid + SL.wid * 4 + eid * SL.K);
+                Atrans[eid] = *(A_lid + SL.wid * 4 + eid * SL.K);
             }
             if (B_valid & (1u << eid)) {
-                Btrans[eid] = *reinterpret_cast<const float*>(B_lid + SL.wid * 4 * SL.N + eid * SL.N);
+                Btrans[eid] = *(B_lid + SL.wid * 4 * SL.N + eid * SL.N);
             }
         }
         // 计算 C 的子区域
@@ -272,8 +260,8 @@ __device__ __forceinline__
 void compute_block_rcr(
     float Creg[2][4][4], float *smem_buf, const float *A, const float *B, const float alpha, const ShapeLayoutSplitK &SL
 ) {
-    float *Asmem = reinterpret_cast<float*>(smem_buf + 1024 * SL.wid);
-    float *Bsmem = reinterpret_cast<float*>(smem_buf + 1024 * SL.wid + (128 + 32) * 2);
+    float *Asmem = smem_buf + 1024 * SL.wid;
+    float *Bsmem = smem_buf + 1024 * SL.wid + (128 + 32) * 2;
 
     // [NEXT] A_lid + eid * SL.K + kth * 16 + slice_idx * 4
     // [NEXT] B_lid + eid * SL.K + kth * 16 + slice_idx * 4
@@ -295,10 +283,10 @@ void compute_block_rcr(
     #pragma unroll
     for (uint32_t eid = 0; eid < 4; ++eid) {
         if ((A_valid & (1u << eid)) && (SL.wid * 4 + SL.lid % 4 < kstart)) {
-            Atrans[eid] = *reinterpret_cast<const float*>(A_lid + SL.wid * 4 + eid * SL.K);
+            Atrans[eid] = *(A_lid + SL.wid * 4 + eid * SL.K);
         }
         if ((B_valid & (1u << eid)) && (SL.wid * 4 + SL.lid % 4 < kstart)) {
-            Btrans[eid] = *reinterpret_cast<const float*>(B_lid + SL.wid * 4 + eid * SL.K);
+            Btrans[eid] = *(B_lid + SL.wid * 4 + eid * SL.K);
         }
     }
 
@@ -316,10 +304,10 @@ void compute_block_rcr(
         #pragma unroll
         for (uint32_t eid = 0; eid < 4; ++eid) {
             if (A_valid & (1u << eid)) {
-                Atrans[eid] = *reinterpret_cast<const float*>(A_lid + SL.wid * 4 + eid * SL.K);
+                Atrans[eid] = *(A_lid + SL.wid * 4 + eid * SL.K);
             }
             if (B_valid & (1u << eid)) {
-                Btrans[eid] = *reinterpret_cast<const float*>(B_lid + SL.wid * 4 + eid * SL.K);
+                Btrans[eid] = *(B_lid + SL.wid * 4 + eid * SL.K);
             }
         }
         // 计算 C 的子区域
@@ -353,8 +341,8 @@ __device__ __forceinline__
 void compute_block_crr(
     float Creg[2][4][4], float *smem_buf, const float *A, const float *B, const float alpha, const ShapeLayoutSplitK &SL
 ) {
-    float *Asmem = reinterpret_cast<float*>(smem_buf + 1024 * SL.wid);
-    float *Bsmem = reinterpret_cast<float*>(smem_buf + 1024 * SL.wid + 128 * 2);
+    float *Asmem = smem_buf + 1024 * SL.wid;
+    float *Bsmem = smem_buf + 1024 * SL.wid + 128 * 2;
 
     // [NEXT] A_lid + eid * SL.M + kth * 16 * SL.M + slice_idx * 4 * SL.M
     // [NEXT] B_lid + eid * SL.N + kth * 16 * SL.N + slice_idx * 4 * SL.N
@@ -376,10 +364,10 @@ void compute_block_crr(
     #pragma unroll
     for (uint32_t eid = 0; eid < 4; ++eid) {
         if ((A_valid & (1u << eid)) && (SL.wid * 4 + eid < kstart)) {
-            Atrans[eid] = *reinterpret_cast<const float*>(A_lid + SL.wid * 4 * SL.M + eid * SL.M);
+            Atrans[eid] = *(A_lid + SL.wid * 4 * SL.M + eid * SL.M);
         }
         if ((B_valid & (1u << eid)) && (SL.wid * 4 + eid < kstart)) {
-            Btrans[eid] = *reinterpret_cast<const float*>(B_lid + SL.wid * 4 * SL.N + eid * SL.N);
+            Btrans[eid] = *(B_lid + SL.wid * 4 * SL.N + eid * SL.N);
         }
     }
 
@@ -402,10 +390,10 @@ void compute_block_crr(
         #pragma unroll
         for (uint32_t eid = 0; eid < 4; ++eid) {
             if (A_valid & (1u << eid)) {
-                Atrans[eid] = *reinterpret_cast<const float*>(A_lid + SL.wid * 4 * SL.M + eid * SL.M);
+                Atrans[eid] = *(A_lid + SL.wid * 4 * SL.M + eid * SL.M);
             }
             if (B_valid & (1u << eid)) {
-                Btrans[eid] = *reinterpret_cast<const float*>(B_lid + SL.wid * 4 * SL.N + eid * SL.N);
+                Btrans[eid] = *(B_lid + SL.wid * 4 * SL.N + eid * SL.N);
             }
         }
         // 计算 C 的子区域
@@ -445,8 +433,8 @@ __device__ __forceinline__
 void compute_block_ccr(
     float Creg[2][4][4], float *smem_buf, const float *A, const float *B, const float alpha, const ShapeLayoutSplitK &SL
 ) {
-    float *Asmem = reinterpret_cast<float*>(smem_buf + 1024 * SL.wid);
-    float *Bsmem = reinterpret_cast<float*>(smem_buf + 1024 * SL.wid + 128 * 2);
+    float *Asmem = smem_buf + 1024 * SL.wid;
+    float *Bsmem = smem_buf + 1024 * SL.wid + 128 * 2;
 
     // [NEXT] A_lid + eid * SL.M + kth * 16 * SL.M + slice_idx * 4 * SL.M
     // [NEXT] B_lid + eid * SL.K + kth * 16 + slice_idx * 4
@@ -468,10 +456,10 @@ void compute_block_ccr(
     #pragma unroll
     for (uint32_t eid = 0; eid < 4; ++eid) {
         if ((A_valid & (1u << eid)) && (SL.wid * 4 + eid < kstart)) {
-            Atrans[eid] = *reinterpret_cast<const float*>(A_lid + SL.wid * 4 * SL.M + eid * SL.M);
+            Atrans[eid] = *(A_lid + SL.wid * 4 * SL.M + eid * SL.M);
         }
         if ((B_valid & (1u << eid)) && (SL.wid * 4 + SL.lid % 4 < kstart)) {
-            Btrans[eid] = *reinterpret_cast<const float*>(B_lid + SL.wid * 4 + eid * SL.K);
+            Btrans[eid] = *(B_lid + SL.wid * 4 + eid * SL.K);
         }
     }
 
@@ -492,10 +480,10 @@ void compute_block_ccr(
         #pragma unroll
         for (uint32_t eid = 0; eid < 4; ++eid) {
             if (A_valid & (1u << eid)) {
-                Atrans[eid] = *reinterpret_cast<const float*>(A_lid + SL.wid * 4 * SL.M + eid * SL.M);
+                Atrans[eid] = *(A_lid + SL.wid * 4 * SL.M + eid * SL.M);
             }
             if (B_valid & (1u << eid)) {
-                Btrans[eid] = *reinterpret_cast<const float*>(B_lid + SL.wid * 4 + eid * SL.K);
+                Btrans[eid] = *(B_lid + SL.wid * 4 + eid * SL.K);
             }
         }
         // 计算 C 的子区域

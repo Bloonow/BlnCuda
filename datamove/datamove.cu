@@ -18,16 +18,16 @@ __global__ void batched_transpose_16x16(
     baseY = brid * 16 + threadIdx.y;  // 向下增长
     if ((baseY < M) && (baseX < N)) {
         // 行主序
-        reg = *reinterpret_cast<const float*>(ld_ptr + blockIdx.z * stride + baseY * N + baseX);
+        reg = *(ld_ptr + blockIdx.z * stride + baseY * N + baseX);
     }
-    *reinterpret_cast<float*>(smem_buf + threadIdx.y * 16 + threadIdx.x) = reg;
+    *(smem_buf + threadIdx.y * 16 + threadIdx.x) = reg;
     __syncthreads();
-    reg = *reinterpret_cast<float*>(smem_buf + threadIdx.x * 16 + threadIdx.y);
+    reg = *(smem_buf + threadIdx.x * 16 + threadIdx.y);
     baseX = brid * 16 + threadIdx.x;  // 向下增长
     baseY = bcid * 16 + threadIdx.y;  // 向右增长
     if ((baseX < M) && (baseY < N)) {
         // 列主序
-        *reinterpret_cast<float*>(st_ptr + blockIdx.z * stride + baseY * M + baseX) = reg;
+        *(st_ptr + blockIdx.z * stride + baseY * M + baseX) = reg;
     }
 }
 
@@ -46,17 +46,17 @@ __global__ void transpose_gather_16x16(
     baseX = baseX + baseX / W_low * (W_all - W_low);  // 处理 Slice 间隔
     if ((baseY < dim) && (baseX < (H_low - 1) * W_all + W_low)) {
         // 行主序
-        reg = *reinterpret_cast<const cuComplex*>(ld_ptr + baseY * H_all * W_all + baseX);
+        reg = *(ld_ptr + baseY * H_all * W_all + baseX);
     }
-    *reinterpret_cast<cuComplex*>(smem_buf + threadIdx.y * 16 + threadIdx.x) = reg;
+    *(smem_buf + threadIdx.y * 16 + threadIdx.x) = reg;
     __syncthreads();
-    reg = *reinterpret_cast<cuComplex*>(smem_buf + threadIdx.x * 16 + threadIdx.y);
+    reg = *(smem_buf + threadIdx.x * 16 + threadIdx.y);
 
     baseX = brid * 16 + threadIdx.x;  // 向下增长
     baseY = bcid * 16 + threadIdx.y;  // 向右增长
     if ((baseX < dim) && (baseY < H_low * W_low)) {
         // 列主序
-        *reinterpret_cast<cuComplex*>(st_ptr + baseY * dim + baseX) = reg;
+        *(st_ptr + baseY * dim + baseX) = reg;
     }
 }
 
@@ -74,17 +74,17 @@ __global__ void transpose_scatter_16x16(
     baseY = bcid * 16 + threadIdx.y;  // 向右增长
     if ((baseX < dim) && (baseY < H_low * W_low)) {
         // 列主序
-        reg = *reinterpret_cast<const cuComplex*>(ld_ptr + baseY * dim + baseX);
+        reg = *(ld_ptr + baseY * dim + baseX);
     }
-    *reinterpret_cast<cuComplex*>(smem_buf + threadIdx.y * 16 + threadIdx.x) = reg;
+    *(smem_buf + threadIdx.y * 16 + threadIdx.x) = reg;
     __syncthreads();
-    reg = *reinterpret_cast<cuComplex*>(smem_buf + threadIdx.x * 16 + threadIdx.y);
+    reg = *(smem_buf + threadIdx.x * 16 + threadIdx.y);
     baseX = bcid * 16 + threadIdx.x;  // 向右增长
     baseY = brid * 16 + threadIdx.y;  // 向下增长
     baseX = baseX + baseX / W_low * (W_all - W_low);  // 处理 Slice 间隔
     if ((baseY < dim) && (baseX < (H_low - 1) * W_all + W_low)) {
         // 行主序
-        *reinterpret_cast<cuComplex*>(st_ptr + baseY * H_all * W_all + baseX) = reg;
+        *(st_ptr + baseY * H_all * W_all + baseX) = reg;
     }
 }
 

@@ -46,7 +46,7 @@ void store_result_smem_rr(
     #pragma unroll
     for (uint32_t gmem_row = 0; gmem_row < 32; gmem_row += 2) {
         ptx::stg(
-            *reinterpret_cast<float*>(smem_buf + gmem_row * 32 + tid),
+            *(smem_buf + gmem_row * 32 + tid),
             C_block + (gmem_row + tid / 32) * N + (tid % 32),
             (brid * 32 + gmem_row + tid / 32 < M) && (bcid * 32 + tid % 32 < N)
         );
@@ -76,7 +76,7 @@ void store_result_smem_rc(
     #pragma unroll
     for (uint32_t gmem_column = 0; gmem_column < 32; gmem_column += 2) {
         ptx::stg(
-            *reinterpret_cast<float*>(smem_buf + gmem_column * 32 + tid),
+            *(smem_buf + gmem_column * 32 + tid),
             C_block + (gmem_column + tid / 32) * M + (tid %32),
             (brid * 32 + tid % 32 < M) && (bcid * 32 + gmem_column + tid / 32 < N)
         );
@@ -91,8 +91,8 @@ void compute_block_rrr(
     const uint32_t wrows, const uint32_t wcols, const uint32_t wrid, const uint32_t wcid,
     const uint32_t lrid, const uint32_t lcid
 ) {
-    float *A_smem = reinterpret_cast<float*>(smem_buf);
-    float *B_smem = reinterpret_cast<float*>(smem_buf + (256 + 32) * 2);
+    float *A_smem = smem_buf;
+    float *B_smem = smem_buf + (256 + 32) * 2;
     // [NEXT] A_smem_st
     // [NEXT] B_smem_st + eid * 32 * sizeof(float)
     uint32_t A_smem_st = ptx::smem_addr(A_smem + tid % 8 * 36 + tid / 8 * 4);
@@ -206,8 +206,8 @@ void compute_block_rcr(
     const uint32_t wrows, const uint32_t wcols, const uint32_t wrid, const uint32_t wcid,
     const uint32_t lrid, const uint32_t lcid
 ) {
-    float *A_smem = reinterpret_cast<float*>(smem_buf);
-    float *B_smem = reinterpret_cast<float*>(smem_buf + (256 + 32) * 2);
+    float *A_smem = smem_buf;
+    float *B_smem = smem_buf + (256 + 32) * 2;
     // [NEXT] A_smem_st
     // [NEXT] B_smem_st
     uint32_t A_smem_st = ptx::smem_addr(A_smem + tid % 8 * 36 + tid / 8 * 4);
@@ -315,8 +315,8 @@ void compute_block_crr(
     const uint32_t wrows, const uint32_t wcols, const uint32_t wrid, const uint32_t wcid,
     const uint32_t lrid, const uint32_t lcid
 ) {
-    float *A_smem = reinterpret_cast<float*>(smem_buf);
-    float *B_smem = reinterpret_cast<float*>(smem_buf + 256 * 2);
+    float *A_smem = smem_buf;
+    float *B_smem = smem_buf + 256 * 2;
     // [NEXT] A_smem_st + eid * 32 * sizeof(float)
     // [NEXT] B_smem_st + eid * 32 * sizeof(float)
     uint32_t A_smem_st = ptx::smem_addr(A_smem + wid * 4 * 32 + lid);
@@ -430,8 +430,8 @@ void compute_block_ccr(
     const uint32_t wrows, const uint32_t wcols, const uint32_t wrid, const uint32_t wcid,
     const uint32_t lrid, const uint32_t lcid
 ) {
-    float *A_smem = reinterpret_cast<float*>(smem_buf);
-    float *B_smem = reinterpret_cast<float*>(smem_buf + 256 * 2);
+    float *A_smem = smem_buf;
+    float *B_smem = smem_buf + 256 * 2;
     // [NEXT] A_smem_st + eid * 32 * sizeof(float)
     // [NEXT] B_smem_st
     uint32_t A_smem_st = ptx::smem_addr(A_smem + wid * 4 * 32 + lid);
