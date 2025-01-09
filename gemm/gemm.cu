@@ -94,4 +94,49 @@ void cublasLt_sgemm(
     if (compute)    cublasLtMatmulDescDestroy(compute);
     if (blasLt)     cublasLtDestroy(blasLt);
 }
+
+void cublasLt_hgemm(
+    const half *A, const half *B, float *C, const float alpha, const float beta,
+    const uint32_t M, const uint32_t N, const uint32_t K, const uint32_t batchCount,
+    const cublasLtOrder_t orderA, const cublasLtOrder_t orderB, const cublasLtOrder_t orderC,
+    const size_t workspaceSize = 4 * 1024 * 1024
+) {
+    cublasLtHandle_t blasLt = NULL;
+    cublasLtMatmulDesc_t compute = NULL;
+    cublasLtMatrixLayout_t Adesc = NULL, Bdesc = NULL, Cdesc = NULL;
+    cublasLtMatmulPreference_t preference = NULL;
+    cublasLtMatmulHeuristicResult_t heuristicResult = {};
+    int returnedResults = 0;
+    void *workspace = NULL;  // For supporting SplitK Algorithm when batchCount is one.
+    cudaMalloc(&workspace, workspaceSize);
+    cublasLtCreate(&blasLt);
+    cublasLtMatmulDescCreate(&compute, CUBLAS_COMPUTE_32F, CUDA_R_32F);
+    cublasLtMatrixLayoutCreate(&Adesc, CUDA_R_16F, M, K, orderA == CUBLASLT_ORDER_ROW ? K : M);
+    cublasLtMatrixLayoutCreate(&Bdesc, CUDA_R_16F, K, N, orderB == CUBLASLT_ORDER_ROW ? N : K);
+    cublasLtMatrixLayoutCreate(&Cdesc, CUDA_R_32F, M, N, orderC == CUBLASLT_ORDER_ROW ? N : M);
+    cublasLtMatrixLayoutSetAttribute(Adesc, CUBLASLT_MATRIX_LAYOUT_ORDER, &orderA, sizeof(orderA));
+    cublasLtMatrixLayoutSetAttribute(Bdesc, CUBLASLT_MATRIX_LAYOUT_ORDER, &orderB, sizeof(orderB));
+    cublasLtMatrixLayoutSetAttribute(Cdesc, CUBLASLT_MATRIX_LAYOUT_ORDER, &orderC, sizeof(orderC));
+    cublasLtMatrixLayoutSetAttribute(Adesc, CUBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &batchCount, sizeof(batchCount));
+    cublasLtMatrixLayoutSetAttribute(Bdesc, CUBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &batchCount, sizeof(batchCount));
+    cublasLtMatrixLayoutSetAttribute(Cdesc, CUBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &batchCount, sizeof(batchCount));
+    int64_t aS = M * K, bS = K * N, cS = M * N;
+    cublasLtMatrixLayoutSetAttribute(Adesc, CUBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET, &aS, sizeof(aS));
+    cublasLtMatrixLayoutSetAttribute(Bdesc, CUBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET, &bS, sizeof(bS));
+    cublasLtMatrixLayoutSetAttribute(Cdesc, CUBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET, &cS, sizeof(cS));
+    cublasLtMatmulPreferenceCreate(&preference);
+    cublasLtMatmulPreferenceSetAttribute(preference, CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, &workspaceSize, sizeof(workspaceSize));
+    cublasLtMatmulAlgoGetHeuristic(blasLt, compute, Adesc, Bdesc, Cdesc, Cdesc, preference, 1, &heuristicResult, &returnedResults);
+    cublasLtMatmul(
+        blasLt, compute, &alpha, A, Adesc, B, Bdesc, &beta, C, Cdesc, C, Cdesc,
+        &heuristicResult.algo, workspace, workspaceSize, NULL
+    );
+    if (workspace)  cudaFree(workspace);
+    if (preference) cublasLtMatmulPreferenceDestroy(preference);
+    if (Cdesc)      cublasLtMatrixLayoutDestroy(Cdesc);
+    if (Bdesc)      cublasLtMatrixLayoutDestroy(Bdesc);
+    if (Adesc)      cublasLtMatrixLayoutDestroy(Adesc);
+    if (compute)    cublasLtMatmulDescDestroy(compute);
+    if (blasLt)     cublasLtDestroy(blasLt);
+}
 #endif // __BL_CUBLASLT_WARPPER__
