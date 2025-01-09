@@ -1,10 +1,10 @@
 #pragma once
 
+#include <stdio.h>
 #include <cuda.h>
 #include <cuda_fp16.h>
 #include <time.h>
 #include <stdarg.h>
-#include <stdio.h>
 
 template<typename Ty>
 Ty* alloc_host_memory(size_t count, double max_init = 1) {
