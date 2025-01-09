@@ -8,6 +8,12 @@
 namespace buffer {
     
 template <typename Type, int num_datum> struct SharedMemory;
+template <int num_datum> struct SharedMemory<char, num_datum> {
+    __device__ char *pointer() {
+        __shared__ char __shared_memory__[num_datum];
+        return reinterpret_cast<char*>(__shared_memory__);
+    }
+};
 template <int num_datum> struct SharedMemory<half, num_datum> {
     __device__ half *pointer() {
         __shared__ half __shared_memory__[num_datum];
