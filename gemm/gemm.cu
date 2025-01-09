@@ -7,6 +7,7 @@
 #include "sgemm_32x32_slicek.cu"
 #include "sgemm_32x32_splitk.cu"
 #include "ampere_sgemm.cu"
+#include "hgemm_128x128.cu"
 
 void sgemm(
     const float *A, const float *B, float *C, const float alpha,

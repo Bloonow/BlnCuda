@@ -1,7 +1,7 @@
 #include <cuda.h>
 #include <cublasLt.h>
 #include "../utils/helper.cu"
-#include "../gemm/sgemm.cu"
+#include "../gemm/gemm.cu"
 
 int main(int argc, char *argv[]) {
     // 若数据规模太大，而显存空间不足分配，则会导致 Segmentation fault (core dumped)
