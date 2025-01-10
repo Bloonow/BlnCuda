@@ -3,7 +3,7 @@
 #include "../gemm/gemm.cu"
 
 int main(int argc, char *argv[]) {
-    int M = 5120 * 1, N = 5120 * 1, K = 2560 * 1;
+    int M = 5120 * 5, N = 5120 * 5, K = 2560 * 3;
     float alpha = 1.5, beta = 2.78;
     half* h_A = alloc_host_memory<half>(M * K);
     half* h_B = alloc_host_memory<half>(K * N);
