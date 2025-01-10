@@ -79,9 +79,7 @@ __global__ void wmma_hgemm_m16n16k16_128x128x128_kernel(
             for (uint32_t cid = 0; cid < 4; ++cid) {
                 wmma::load_matrix_sync(acc_frag[rid][cid], acc_smem_ptr + rid * 16 * 128 + cid * 16, 128, wmma::mem_row_major);
                 #pragma unroll
-                for (uint32_t i = 0; i < acc_frag[rid][cid].num_elements; ++i) {
-                    acc_frag[rid][cid].x[i] *= beta;
-                }
+                for (uint32_t i = 0; i < acc_frag[rid][cid].num_elements; ++i) { acc_frag[rid][cid].x[i] *= beta; }
             }
         }
         __syncthreads();
