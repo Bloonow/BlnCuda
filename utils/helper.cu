@@ -1,10 +1,11 @@
 #pragma once
 
 #include <stdio.h>
-#include <cuda.h>
-#include <cuda_fp16.h>
 #include <time.h>
 #include <stdarg.h>
+#include <cuda.h>
+#include <cuda_fp16.h>
+#include <cutlass/half.h>
 
 template<typename Ty>
 Ty* alloc_host_memory(size_t count, double max_init = 1) {
@@ -139,6 +140,28 @@ void host_gemm(
 ) {
     Accessor<half, A_layout> A_ = Accessor<half, A_layout>(A, M, K);
     Accessor<half, B_layout> B_ = Accessor<half, B_layout>(B, K, N);
+    Accessor<float, C_layout> C_ = Accessor<float, C_layout>(C, M, N);
+    for (size_t bid = 0; bid < batch_size; bid++) {
+        for (size_t rid = 0; rid < M; rid++) {
+            for (size_t cid = 0; cid < N; cid++) {
+                float value = 0;
+                for (size_t kid = 0; kid < K; kid++) {
+                    value += (float)(A_(bid, rid, kid)) * (float)(B_(bid, kid, cid));
+                }
+                C_(bid, rid, cid) = alpha * value + beta * C_(bid, rid, cid);
+            }
+        }
+    }
+}
+
+// specialization for cutlass::half_t which supports '*' just on device
+template<typename A_layout, typename B_layout, typename C_layout>
+void host_gemm(
+    cutlass::half_t* A, cutlass::half_t* B, float* C, float alpha, float beta,
+    size_t M, size_t N, size_t K, size_t batch_size
+) {
+    Accessor<cutlass::half_t, A_layout> A_ = Accessor<cutlass::half_t, A_layout>(A, M, K);
+    Accessor<cutlass::half_t, B_layout> B_ = Accessor<cutlass::half_t, B_layout>(B, K, N);
     Accessor<float, C_layout> C_ = Accessor<float, C_layout>(C, M, N);
     for (size_t bid = 0; bid < batch_size; bid++) {
         for (size_t rid = 0; rid < M; rid++) {

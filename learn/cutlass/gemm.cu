@@ -1,13 +1,53 @@
 #include <stdio.h>
+#include <assert.h>
 #include <cuda.h>
+#include <cutlass/tensor_ref.h>
+#include <cutlass/gemm_coord.h>
 #include <cutlass/gemm/device/gemm.h>
 #include <cutlass/gemm/device/gemm_batched.h>
 #include <cutlass/gemm/device/gemm_array.h>
 #include "../../utils/helper.cu"
 
+static constexpr uint32_t M = 512 * 2;
+static constexpr uint32_t N = 512 * 2;
+static constexpr uint32_t K = 256 * 2;
+static constexpr uint32_t Batch = 4;
+static constexpr float alpha = 3.14;
+static constexpr float beta = 2.71;
+
+void gemm_tensor_core_demo() {
+    assert(M % 128 == 0 && N % 128 == 0 && K % 128 == 0);
+    cutlass::half_t *h_A = alloc_host_memory<cutlass::half_t>(M * K);
+    cutlass::half_t *h_B = alloc_host_memory<cutlass::half_t>(K * N);
+    float *h_C = alloc_host_memory<float>(M * N);
+    float *ret_C = alloc_host_memory<float>(M * N);
+    cutlass::half_t *d_A = alloc_cuda_memory<cutlass::half_t>(M * K, h_A);
+    cutlass::half_t *d_B = alloc_cuda_memory<cutlass::half_t>(K * N, h_B);
+    float *d_C = alloc_cuda_memory<float>(M * N, h_C);
+
+    using ThreadblockShape = cutlass::gemm::GemmShape<128, 128, 16>;
+    using WarpShape = cutlass::gemm::GemmShape<64, 64, 16>;
+    using InstructionShape = cutlass::gemm::GemmShape<16, 8, 8>;
+    using GemmTensorCore = cutlass::gemm::device::Gemm<
+        cutlass::half_t, cutlass::layout::RowMajor,
+        cutlass::half_t, cutlass::layout::ColumnMajor,
+        float, cutlass::layout::RowMajor,
+        float, cutlass::arch::OpClassTensorOp, cutlass::arch::Sm80,
+        ThreadblockShape, WarpShape, InstructionShape
+    >;
+    GemmTensorCore gemm_tensor_core_op;
+    cutlass::Status stat = gemm_tensor_core_op(
+        {{M, N, K}, {d_A, K}, {d_B, K}, {d_C, N}, {d_C, N}, {alpha, beta}}
+    );
+    cudaMemcpy(ret_C, d_C, sizeof(float) * M * N, cudaMemcpyDeviceToHost);
+
+    host_gemm<row_major, col_major, row_major>(h_A, h_B, h_C, alpha, beta, M, N, K, 1);
+    check_same<float>(h_C, ret_C,  M * N, 1.e-3);
+
+    free_memory(7, h_A, h_B, h_C, ret_C, d_A, d_B, d_C);
+}
+
 void gemm_demo() {
-    int M = 456, N = 987, K = 543;
-    float alpha = 3.14, beta = 2.71;
     float *h_A = alloc_host_memory<float>(M * K);
     float *h_B = alloc_host_memory<float>(K * N);
     float *h_C = alloc_host_memory<float>(M * N);
@@ -35,8 +75,6 @@ void gemm_demo() {
 }
 
 void gemm_batched_demo() {
-    int Batch = 4, M = 456, N = 987, K = 543;
-    float alpha = 3.14, beta = 2.71;
     float *h_A = alloc_host_memory<float>(Batch * M * K);
     float *h_B = alloc_host_memory<float>(Batch * K * N);
     float *h_C = alloc_host_memory<float>(Batch * M * N);
@@ -63,8 +101,6 @@ void gemm_batched_demo() {
 }
 
 void gemm_array_demo() {
-    int Batch = 4, M = 456, N = 987, K = 543;
-    float alpha = 3.14, beta = 2.71;
     float *h_A = alloc_host_memory<float>(Batch * M * K);
     float *h_B = alloc_host_memory<float>(Batch * K * N);
     float *h_C = alloc_host_memory<float>(Batch * M * N);
@@ -100,6 +136,7 @@ void gemm_array_demo() {
 }
 
 int main(int argc, char *argv[]) {
+    gemm_tensor_core_demo();
     gemm_demo();
     gemm_batched_demo();
     gemm_array_demo();

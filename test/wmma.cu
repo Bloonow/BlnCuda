@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <cuda.h>
 #include <mma.h>
+#include <cutlass/gemm/device/gemm.h>
 
 #include "../utils/helper.cu"
 #include "../gemm/hgemm_128x128.cu"
@@ -211,9 +212,17 @@ int main(int argc, char *argv[]) {
     cudaMemcpy(ret_D0, d_D, M * N * sizeof(float), cudaMemcpyDeviceToHost);
 
     // cublasLt_hgemm(d_A, d_B, d_C, alpha, beta, M, N, K, 1, CUBLASLT_ORDER_ROW, CUBLASLT_ORDER_COL, CUBLASLT_ORDER_ROW);
-    sample::compute_gemm_cuda(d_A, d_B, d_C, d_D, alpha, beta);
+    // sample::compute_gemm_cuda(d_A, d_B, d_C, d_D, alpha, beta);
+    cutlass::gemm::device::Gemm<
+        half, cutlass::layout::RowMajor,
+        half, cutlass::layout::ColumnMajor,
+        float, cutlass::layout::RowMajor,
+        float, cutlass::arch::OpClassWmmaTensorOp, cutlass::arch::Sm89
+    > gemm_op;
+    cutlass::Status stat = gemm_op(
+        {{M, N, K}, {d_A, K}, {d_B, K}, {d_C, N}, {d_D, N}, {alpha, beta}}
+    );
     cudaMemcpy(ret_D1, d_D, M * N * sizeof(float), cudaMemcpyDeviceToHost);
-
     check_same<float>(ret_D0, ret_D1, M * N, 1.e-5);
 
     free_memory(9, h_A, h_B, h_C, ret_D0, ret_D1, d_A, d_B, d_C, d_D);
