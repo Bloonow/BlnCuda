@@ -1,11 +1,11 @@
 #include <stdio.h>
 #include <cuda.h>
 #include <cublasLt.h>
-#include "../../utils/helper.cu"
+#include "../utils/helper.cu"
 
 int main(int argc, char *argv[]) {
-    int32_t Batch = 4;
     int64_t M = 456, N = 987, K = 543;
+    int32_t Batch = 4;
     uint64_t workspace_bytes = 16 * 1024 * 1024;
     float alpha = 3.14, beta = 2.71;
     float *h_A = alloc_host_memory<float>(Batch * M * K);
@@ -86,7 +86,7 @@ int main(int argc, char *argv[]) {
     cudaMemcpy(ret_D, d_D, sizeof(float) * Batch * M * N, cudaMemcpyDeviceToHost);
 
     // 主机乘法验证
-    host_matmul_relu<float, col_major, col_major, col_major, col_major>(
+    host_matmul_relu<float, col_major, float, col_major, float, col_major>(
         h_A, h_B, h_C, h_D, h_bias, alpha, beta, M, N, K, Batch
     );
     check_same<float>(h_D, ret_D, Batch * M * N, 1e-4);

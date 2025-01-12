@@ -63,138 +63,127 @@ struct row_major;
 struct col_major;
 
 template<typename Ty, typename layout> struct Accessor;
-
 template<typename Ty>
 struct Accessor<Ty, row_major> {
     Ty* data;
     size_t rows, cols;
     Accessor(Ty* data_, size_t rows_, size_t cols_) : data(data_), rows(rows_), cols(cols_) {}
-    Accessor(Ty* data_, size_t cols_) : data(data_), rows(1), cols(cols_) {}
     Ty& operator()(size_t bid, size_t rid, size_t cid) {
         return data[bid * rows * cols + rid * cols + cid];
     }
-    Ty& operator()(size_t bid, size_t cid) {
-        return data[bid * cols + cid];
-    }
 };
-
 template<typename Ty>
 struct Accessor<Ty, col_major> {
     Ty* data;
     size_t rows, cols;
     Accessor(Ty* data_, size_t rows_, size_t cols_) : data(data_), rows(rows_), cols(cols_) {}
-    Accessor(Ty* data_, size_t rows_) : data(data_), rows(rows_), cols(1) {}
     Ty& operator()(size_t bid, size_t rid, size_t cid) {
         return data[bid * rows * cols + cid * rows + rid];
     }
-    Ty& operator()(size_t bid, size_t rid) {
-        return data[bid * rows + rid];
+};
+
+template<typename Ty>
+struct VectorAccessor {
+    Ty* data;
+    size_t stride;
+    VectorAccessor(Ty* data_, size_t stride_) : data(data_), stride(stride_) {}
+    Ty& operator()(size_t bid, size_t idx) {
+        return data[bid * stride + idx];
     }
 };
 
-template<typename Ty, typename layout>
+
+template<typename A_type, typename A_layout, typename acc_type = A_type>
 void host_gemv(
-    Ty* A, Ty* x, Ty* y, Ty alpha, Ty beta,
+    A_type* A, acc_type* x, acc_type* y, acc_type alpha, acc_type beta,
     size_t M, size_t N, size_t batch_size
 ) {
-    Accessor<Ty, layout> A_ = Accessor<Ty, layout>(A, M, N);
-    Accessor<Ty, col_major> x_ = Accessor<Ty, col_major>(x, N);
-    Accessor<Ty, col_major> y_ = Accessor<Ty, col_major>(y, M);
+    Accessor<A_type, A_layout> A_ = Accessor<A_type, A_layout>(A, M, N);
+    VectorAccessor<acc_type> x_ = VectorAccessor<acc_type>(x, N);
+    VectorAccessor<acc_type> y_ = VectorAccessor<acc_type>(y, M);
     for (size_t bid = 0; bid < batch_size; bid++) {
         for (size_t rid = 0; rid < M; rid++) {
-            Ty value = 0;
+            acc_type value = 0;
             for (size_t kid = 0; kid < N; kid++) {
-                value += A_(bid, rid, kid) * x_(bid, kid);
+                value += static_cast<acc_type>(A_(bid, rid, kid)) * x_(bid, kid);
             }
             y_(bid, rid) = alpha * value + beta * y_(bid, rid);
         }
     }
 }
 
-template<typename Ty, typename A_layout, typename B_layout, typename C_layout>
+template<typename A_type, typename A_layout, typename B_type, typename B_layout, typename C_type, typename C_layout, 
+    typename D_type = C_type, typename D_layout = C_layout, typename acc_type = C_type>
 void host_gemm(
-    Ty* A, Ty* B, Ty* C, Ty alpha, Ty beta,
+    A_type* A, B_type* B, C_type* C, D_type* D, acc_type alpha, acc_type beta,
     size_t M, size_t N, size_t K, size_t batch_size
 ) {
-    Accessor<Ty, A_layout> A_ = Accessor<Ty, A_layout>(A, M, K);
-    Accessor<Ty, B_layout> B_ = Accessor<Ty, B_layout>(B, K, N);
-    Accessor<Ty, C_layout> C_ = Accessor<Ty, C_layout>(C, M, N);
-    for (size_t bid = 0; bid < batch_size; bid++) {
-        for (size_t rid = 0; rid < M; rid++) {
-            for (size_t cid = 0; cid < N; cid++) {
-                Ty value = 0;
-                for (size_t kid = 0; kid < K; kid++) {
-                    value += A_(bid, rid, kid) * B_(bid, kid, cid);
+    Accessor<A_type, A_layout> A_ = Accessor<A_type, A_layout>(A, M, K);
+    Accessor<B_type, B_layout> B_ = Accessor<B_type, B_layout>(B, K, N);
+    Accessor<C_type, C_layout> C_ = Accessor<C_type, C_layout>(C, M, N);
+    Accessor<D_type, D_layout> D_ = Accessor<D_type, D_layout>(D, M, N);
+    if (C != nullptr && beta != 0) {
+        for (size_t bid = 0; bid < batch_size; bid++) {
+            for (size_t rid = 0; rid < M; rid++) {
+                for (size_t cid = 0; cid < N; cid++) {
+                    acc_type value = 0;
+                    for (size_t kid = 0; kid < K; kid++) {
+                        value += static_cast<acc_type>(A_(bid, rid, kid)) * static_cast<acc_type>(B_(bid, kid, cid));
+                    }
+                    D_(bid, rid, cid) = alpha * value + beta * static_cast<acc_type>(C_(bid, rid, cid));
                 }
-                C_(bid, rid, cid) = alpha * value + beta * C_(bid, rid, cid);
+            }
+        }
+    } else {
+        for (size_t bid = 0; bid < batch_size; bid++) {
+            for (size_t rid = 0; rid < M; rid++) {
+                for (size_t cid = 0; cid < N; cid++) {
+                    acc_type value = 0;
+                    for (size_t kid = 0; kid < K; kid++) {
+                        value += static_cast<acc_type>(A_(bid, rid, kid)) * static_cast<acc_type>(B_(bid, kid, cid));
+                    }
+                    D_(bid, rid, cid) = alpha * value;
+                }
             }
         }
     }
 }
 
-// specialization for half which supports '*' just on device
-template<typename A_layout, typename B_layout, typename C_layout>
-void host_gemm(
-    half* A, half* B, float* C, float alpha, float beta,
-    size_t M, size_t N, size_t K, size_t batch_size
-) {
-    Accessor<half, A_layout> A_ = Accessor<half, A_layout>(A, M, K);
-    Accessor<half, B_layout> B_ = Accessor<half, B_layout>(B, K, N);
-    Accessor<float, C_layout> C_ = Accessor<float, C_layout>(C, M, N);
-    for (size_t bid = 0; bid < batch_size; bid++) {
-        for (size_t rid = 0; rid < M; rid++) {
-            for (size_t cid = 0; cid < N; cid++) {
-                float value = 0;
-                for (size_t kid = 0; kid < K; kid++) {
-                    value += (float)(A_(bid, rid, kid)) * (float)(B_(bid, kid, cid));
-                }
-                C_(bid, rid, cid) = alpha * value + beta * C_(bid, rid, cid);
-            }
-        }
-    }
-}
-
-// specialization for cutlass::half_t which supports '*' just on device
-template<typename A_layout, typename B_layout, typename C_layout>
-void host_gemm(
-    cutlass::half_t* A, cutlass::half_t* B, float* C, float alpha, float beta,
-    size_t M, size_t N, size_t K, size_t batch_size
-) {
-    Accessor<cutlass::half_t, A_layout> A_ = Accessor<cutlass::half_t, A_layout>(A, M, K);
-    Accessor<cutlass::half_t, B_layout> B_ = Accessor<cutlass::half_t, B_layout>(B, K, N);
-    Accessor<float, C_layout> C_ = Accessor<float, C_layout>(C, M, N);
-    for (size_t bid = 0; bid < batch_size; bid++) {
-        for (size_t rid = 0; rid < M; rid++) {
-            for (size_t cid = 0; cid < N; cid++) {
-                float value = 0;
-                for (size_t kid = 0; kid < K; kid++) {
-                    value += (float)(A_(bid, rid, kid)) * (float)(B_(bid, kid, cid));
-                }
-                C_(bid, rid, cid) = alpha * value + beta * C_(bid, rid, cid);
-            }
-        }
-    }
-}
-
-template<typename Ty, typename A_layout, typename B_layout, typename C_layout, typename D_layout>
+template<typename A_type, typename A_layout, typename B_type, typename B_layout, typename C_type, typename C_layout, 
+    typename D_type = C_type, typename D_layout = C_layout, typename acc_type = C_type>
 void host_matmul_relu(
-    Ty* A, Ty* B, Ty* C, Ty* D, Ty* bias, Ty alpha, Ty beta,
+    A_type* A, B_type* B, C_type* C, D_type* D, acc_type* bias, acc_type alpha, acc_type beta,
     size_t M, size_t N, size_t K, size_t batch_size
 ) {
-    Accessor<Ty, A_layout> A_ = Accessor<Ty, A_layout>(A, M, K);
-    Accessor<Ty, B_layout> B_ = Accessor<Ty, B_layout>(B, K, N);
-    Accessor<Ty, C_layout> C_ = Accessor<Ty, C_layout>(C, M, N);
-    Accessor<Ty, D_layout> D_ = Accessor<Ty, D_layout>(D, M, N);
-    Accessor<Ty, col_major> bias_ = Accessor<Ty, col_major>(bias, M);
-    for (size_t bid = 0; bid < batch_size; bid++) {
-        for (size_t rid = 0; rid < M; rid++) {
-            for (size_t cid = 0; cid < N; cid++) {
-                Ty value = 0;
-                for (size_t kid = 0; kid < K; kid++) {
-                    value += A_(bid, rid, kid) * B_(bid, kid, cid);
+    Accessor<A_type, A_layout> A_ = Accessor<A_type, A_layout>(A, M, K);
+    Accessor<B_type, B_layout> B_ = Accessor<B_type, B_layout>(B, K, N);
+    Accessor<C_type, C_layout> C_ = Accessor<C_type, C_layout>(C, M, N);
+    Accessor<D_type, D_layout> D_ = Accessor<D_type, D_layout>(D, M, N);
+    VectorAccessor<acc_type> bias_ = VectorAccessor<acc_type>(bias, M);
+    if (C != nullptr && beta != 0) {
+        for (size_t bid = 0; bid < batch_size; bid++) {
+            for (size_t rid = 0; rid < M; rid++) {
+                for (size_t cid = 0; cid < N; cid++) {
+                    acc_type value = 0;
+                    for (size_t kid = 0; kid < K; kid++) {
+                        value += static_cast<acc_type>(A_(bid, rid, kid)) * static_cast<acc_type>(B_(bid, kid, cid));
+                    }
+                    value = alpha * value + beta * static_cast<acc_type>(C_(bid, rid, cid)) + bias_(bid, rid);
+                    D_(bid, rid, cid) = value > 0 ? value : 0;
                 }
-                value = alpha * value + beta * C_(bid, rid, cid) + bias_(bid, rid);
-                D_(bid, rid, cid) = value > 0 ? value : 0;
+            }
+        }
+    } else {
+        for (size_t bid = 0; bid < batch_size; bid++) {
+            for (size_t rid = 0; rid < M; rid++) {
+                for (size_t cid = 0; cid < N; cid++) {
+                    acc_type value = 0;
+                    for (size_t kid = 0; kid < K; kid++) {
+                        value += static_cast<acc_type>(A_(bid, rid, kid)) * static_cast<acc_type>(B_(bid, kid, cid));
+                    }
+                    value = alpha * value + bias_(bid, rid);
+                    D_(bid, rid, cid) = value > 0 ? value : 0;
+                }
             }
         }
     }

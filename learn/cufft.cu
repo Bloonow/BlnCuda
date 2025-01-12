@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <cuda.h>
 #include <cufft.h>
-#include "../../utils/helper.cu"
+#include "../utils/helper.cu"
 
 __global__ void scale_kernel(cufftComplex* data, float factor, const int count) {
     const int tid = blockIdx.x * blockDim.x + threadIdx.x;
