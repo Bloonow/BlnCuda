@@ -4,8 +4,6 @@
 #include <time.h>
 #include <stdarg.h>
 #include <cuda.h>
-#include <cuda_fp16.h>
-#include <cutlass/half.h>
 
 template<typename Ty>
 Ty* alloc_host_memory(size_t count, double max_init = 1) {
