@@ -10,9 +10,9 @@
 #include <cutlass/gemm/device/gemm_array.h>
 #include <cutlass/util/device_memory.h>
 
-static constexpr uint32_t M = 512 + 55;
-static constexpr uint32_t N = 512 + 33;
-static constexpr uint32_t K = 256 + 11;
+static constexpr uint32_t M = 1024 + 55;
+static constexpr uint32_t N = 1024 + 33;
+static constexpr uint32_t K = 512 + 11;
 static constexpr uint32_t Batch = 4;
 static constexpr float alpha = 3.14;
 static constexpr float beta = 2.71;
