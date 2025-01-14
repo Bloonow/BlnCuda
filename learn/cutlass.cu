@@ -10,9 +10,9 @@
 #include <cutlass/gemm/device/gemm_array.h>
 #include <cutlass/util/device_memory.h>
 
-static constexpr uint32_t M = 512;
-static constexpr uint32_t N = 512;
-static constexpr uint32_t K = 256;
+static constexpr uint32_t M = 512 + 55;
+static constexpr uint32_t N = 512 + 33;
+static constexpr uint32_t K = 256 + 11;
 static constexpr uint32_t Batch = 4;
 static constexpr float alpha = 3.14;
 static constexpr float beta = 2.71;
@@ -51,7 +51,7 @@ void demo_gemm() {
         Stages, AlignmentA, AlignmentB, SplitKSerial, Operator
     >;
     // 矩阵乘法类的实例对象
-    Gemm ComputeOp;
+    Gemm compute_op;
     // 所需要的参数，执行时动态构造
     cutlass::gemm::GemmCoord problem_size = { M, N, K };
     cutlass::TensorRef<const ElementA, LayoutA> ref_A = { d_A, K };
@@ -59,20 +59,22 @@ void demo_gemm() {
     cutlass::TensorRef<const ElementC, LayoutC> ref_C = { d_C, N };
     cutlass::TensorRef<ElementAccumulator, LayoutC> ref_D = { d_D, N };
     EpilogueOutputOp::Params epilogue = { alpha, beta };
-    Gemm::Arguments args(problem_size, ref_A, ref_B, ref_C, ref_D, epilogue);
-    cutlass::Status status = ComputeOp.can_implement(args);
+    Gemm::Arguments args = {
+        problem_size, ref_A, ref_B, ref_C, ref_D, epilogue
+    };
+    cutlass::Status status = compute_op.can_implement(args);
     if (status != cutlass::Status::kSuccess) {
         printf("%s\n", cutlass::cutlassGetStatusString(status));
         exit(-1);
     }
     // 所需的工作空间
-    size_t workspace_bytes = ComputeOp.get_workspace_size(args);
+    size_t workspace_bytes = compute_op.get_workspace_size(args);
     cutlass::device_memory::allocation<uint8_t> workspace(workspace_bytes);
     // 调用方式之一
-    // status = ComputeOp.initialize(args, workspace.get());
-    // status = ComputeOp.run(nullptr);
+    // status = compute_op.initialize(args, workspace.get());
+    // status = compute_op.run(nullptr);
     // 调用方式之二，实际上是operator()内部先调用initialize()方法再调用run()方法
-    ComputeOp(args, workspace.get(), nullptr);
+    compute_op(args, workspace.get(), nullptr);
     // 释放所分配的工作空间
     workspace.reset();
 
@@ -82,69 +84,159 @@ void demo_gemm() {
     free_memory(9, h_A, h_B, h_C, h_D, d_A, d_B, d_C, d_D, ret_D);
 }
 
-/*
-
 void demo_gemm_batched() {
     float *h_A = alloc_host_memory<float>(Batch * M * K);
     float *h_B = alloc_host_memory<float>(Batch * K * N);
     float *h_C = alloc_host_memory<float>(Batch * M * N);
-    float *ret_C = alloc_host_memory<float>(Batch * M * N);
+    float *h_D = alloc_host_memory<float>(Batch * M * N);
     float *d_A = alloc_cuda_memory<float>(Batch * M * K, h_A);
     float *d_B = alloc_cuda_memory<float>(Batch * K * N, h_B);
     float *d_C = alloc_cuda_memory<float>(Batch * M * N, h_C);
-    
+    float *d_D = alloc_cuda_memory<float>(Batch * M * N, h_D);
+    float *ret_D = alloc_host_memory<float>(Batch * M * N);
+
+    // 编译时静态构造的矩阵乘法类
+    using ElementA = float; using LayoutA = cutlass::layout::RowMajor;
+    using ElementB = float; using LayoutB = cutlass::layout::ColumnMajor;
+    using ElementC = float; using LayoutC = cutlass::layout::RowMajor;
+    using ElementAccumulator = float;
+    using OperatorClass = cutlass::arch::OpClassSimt;
+    using ArchTag = cutlass::arch::Sm70;
+    using ThreadblockShape = cutlass::gemm::GemmShape<128, 128, 8>;
+    using WarpShape = cutlass::gemm::GemmShape<32, 64, 8>;
+    using InstructionShape = cutlass::gemm::GemmShape<1, 1, 1>;
+    using EpilogueOutputOp = cutlass::epilogue::thread::LinearCombination<ElementC, 1, ElementAccumulator, ElementAccumulator>;
+    using ThreadblockSwizzle = cutlass::gemm::threadblock::GemmBatchedIdentityThreadblockSwizzle;
+    constexpr int Stages = 2;
+    constexpr int AlignmentA = 1;
+    constexpr int AlignmentB = 1;
+    using Operator = cutlass::arch::OpMultiplyAdd;
     using GemmBatched = cutlass::gemm::device::GemmBatched<
-        float, cutlass::layout::ColumnMajor,
-        float, cutlass::layout::ColumnMajor,
-        float, cutlass::layout::ColumnMajor, float
+        ElementA, LayoutA, ElementB, LayoutB, ElementC, LayoutC, ElementAccumulator, OperatorClass, ArchTag,
+        ThreadblockShape, WarpShape, InstructionShape, EpilogueOutputOp, ThreadblockSwizzle,
+        Stages, AlignmentA, AlignmentB, Operator
     >;
-    GemmBatched gemm_batched_op;
-    cutlass::Status status = gemm_batched_op(
-        {{M, N, K}, {d_A, M}, M * K, {d_B, K}, K * N, {d_C, M}, M * N, {d_C, M}, M * N, {alpha, beta}, Batch}
-    );
-    cudaMemcpy(ret_C, d_C, sizeof(float) * Batch * M * N, cudaMemcpyDeviceToHost);
+    // 矩阵乘法类的实例对象
+    GemmBatched compute_op;
+    // 所需要的参数，执行时动态构造
+    cutlass::gemm::GemmCoord problem_size = { M, N, K };
+    cutlass::TensorRef<const ElementA, LayoutA> ref_A = { d_A, K };
+    int64_t stride_A = M * K;
+    cutlass::TensorRef<const ElementB, LayoutB> ref_B = { d_B, K };
+    int64_t stride_B = K * N;
+    cutlass::TensorRef<const ElementC, LayoutC> ref_C = { d_C, N };
+    int64_t stride_C = M * N;
+    cutlass::TensorRef<ElementAccumulator, LayoutC> ref_D = { d_D, N };
+    int64_t stride_D = M * N;
+    EpilogueOutputOp::Params epilogue = { alpha, beta };
+    int batch_count = Batch;
+    GemmBatched::Arguments args = {
+        problem_size, ref_A, stride_A, ref_B, stride_B, ref_C, stride_C, ref_D, stride_D, epilogue, batch_count
+    };
+    cutlass::Status status = compute_op.can_implement(args);
+    if (status != cutlass::Status::kSuccess) {
+        printf("%s\n", cutlass::cutlassGetStatusString(status));
+        exit(-1);
+    }
+    // 所需的工作空间
+    size_t workspace_bytes = compute_op.get_workspace_size(args);
+    cutlass::device_memory::allocation<uint8_t> workspace(workspace_bytes);
+    // 调用方式之一
+    // status = compute_op.initialize(args, workspace.get());
+    // status = compute_op.run(nullptr);
+    // 调用方式之二，实际上是operator()内部先调用initialize()方法再调用run()方法
+    compute_op(args, workspace.get(), nullptr);
+    // 释放所分配的工作空间
+    workspace.reset();
 
-    host_gemm<float, col_major, col_major, col_major>(h_A, h_B, h_C, alpha, beta, M, N, K, Batch);
-    check_same<float>(h_C, ret_C, Batch * M * N, 1e-4);
-
-    free_memory(7, h_A, h_B, h_C, ret_C, d_A, d_B, d_C);
+    host_gemm<float, row_major, float, col_major, float, row_major>(h_A, h_B, h_C, h_D, alpha, beta, M, N, K, Batch);
+    cudaMemcpy(ret_D, d_D, sizeof(float) * M * N, cudaMemcpyDeviceToHost);
+    check_same<float>(h_D, ret_D,  M * N, 1.e-4);
+    free_memory(9, h_A, h_B, h_C, h_D, d_A, d_B, d_C, d_D, ret_D);
 }
 
 void demo_gemm_array() {
     float *h_A = alloc_host_memory<float>(Batch * M * K);
     float *h_B = alloc_host_memory<float>(Batch * K * N);
     float *h_C = alloc_host_memory<float>(Batch * M * N);
-    float *ret_C = alloc_host_memory<float>(Batch * M * N);
+    float *h_D = alloc_host_memory<float>(Batch * M * N);
     float *d_A = alloc_cuda_memory<float>(Batch * M * K, h_A);
     float *d_B = alloc_cuda_memory<float>(Batch * K * N, h_B);
     float *d_C = alloc_cuda_memory<float>(Batch * M * N, h_C);
-    float **dd_A_array;  cudaMalloc(&dd_A_array, Batch * sizeof(float*));
-    float **dd_B_array;  cudaMalloc(&dd_B_array, Batch * sizeof(float*));
-    float **dd_C_array;  cudaMalloc(&dd_C_array, Batch * sizeof(float*));
-    float *d_A_array[Batch];  for(int i = 0; i < Batch; i++) { d_A_array[i] = d_A + i * M * K; }
-    float *d_B_array[Batch];  for(int i = 0; i < Batch; i++) { d_B_array[i] = d_B + i * K * N; }
-    float *d_C_array[Batch];  for(int i = 0; i < Batch; i++) { d_C_array[i] = d_C + i * M * N; }
-    cudaMemcpy(dd_A_array, d_A_array, Batch * sizeof(float*), cudaMemcpyHostToDevice);
-    cudaMemcpy(dd_B_array, d_B_array, Batch * sizeof(float*), cudaMemcpyHostToDevice);
-    cudaMemcpy(dd_C_array, d_C_array, Batch * sizeof(float*), cudaMemcpyHostToDevice);
+    float *d_D = alloc_cuda_memory<float>(Batch * M * N, h_D);
+    float *ret_D = alloc_host_memory<float>(Batch * M * N);
+    // 数组元素是设备内存上的每个矩阵数据的地址
+    float **h_A_devAddrs = (float**)malloc(Batch * sizeof(float*));
+    float **h_B_devAddrs = (float**)malloc(Batch * sizeof(float*));
+    float **h_C_devAddrs = (float**)malloc(Batch * sizeof(float*));
+    float **h_D_devAddrs = (float**)malloc(Batch * sizeof(float*));
+    for(int i = 0; i < Batch; i++) {
+        h_A_devAddrs[i] = d_A + i * M * K;
+        h_B_devAddrs[i] = d_B + i * K * N;
+        h_C_devAddrs[i] = d_C + i * M * N;
+        h_D_devAddrs[i] = d_D + i * M * N;
+    }
+    float **d_A_devAddrs = alloc_cuda_memory<float*>(Batch, h_A_devAddrs);
+    float **d_B_devAddrs = alloc_cuda_memory<float*>(Batch, h_B_devAddrs);
+    float **d_C_devAddrs = alloc_cuda_memory<float*>(Batch, h_C_devAddrs);
+    float **d_D_devAddrs = alloc_cuda_memory<float*>(Batch, h_D_devAddrs);
 
+    // 编译时静态构造的矩阵乘法类
+    using ElementA = float; using LayoutA = cutlass::layout::RowMajor;
+    using ElementB = float; using LayoutB = cutlass::layout::ColumnMajor;
+    using ElementC = float; using LayoutC = cutlass::layout::RowMajor;
+    using ElementAccumulator = float;
+    using OperatorClass = cutlass::arch::OpClassSimt;
+    using ArchTag = cutlass::arch::Sm70;
+    using ThreadblockShape = cutlass::gemm::GemmShape<128, 128, 8>;
+    using WarpShape = cutlass::gemm::GemmShape<32, 64, 8>;
+    using InstructionShape = cutlass::gemm::GemmShape<1, 1, 1>;
+    using EpilogueOutputOp = cutlass::epilogue::thread::LinearCombination<ElementC, 1, ElementAccumulator, ElementAccumulator>;
+    using ThreadblockSwizzle = cutlass::gemm::threadblock::GemmBatchedIdentityThreadblockSwizzle;
+    constexpr int Stages = 2;
+    constexpr int AlignmentA = 1;
+    constexpr int AlignmentB = 1;
+    using Operator = cutlass::arch::OpMultiplyAdd;
     using GemmArray = cutlass::gemm::device::GemmArray<
-        float, cutlass::layout::ColumnMajor,
-        float, cutlass::layout::ColumnMajor,
-        float, cutlass::layout::ColumnMajor, float
+        ElementA, LayoutA, ElementB, LayoutB, ElementC, LayoutC, ElementAccumulator, OperatorClass, ArchTag,
+        ThreadblockShape, WarpShape, InstructionShape, EpilogueOutputOp, ThreadblockSwizzle,
+        Stages, AlignmentA, AlignmentB, Operator
     >;
-    GemmArray gemm_array_op;
-    gemm_array_op(
-        {{M, N, K}, dd_A_array, M, dd_B_array, K, dd_C_array, M, dd_C_array, M, {alpha, beta}, Batch}
+    // 矩阵乘法类的实例对象
+    GemmArray compute_op;
+    // 所需要的参数，执行时动态构造
+    cutlass::gemm::GemmCoord problem_size = { M, N, K };
+    EpilogueOutputOp::Params epilogue = { alpha, beta };
+    GemmArray::Arguments args = {
+        problem_size, d_A_devAddrs, K, d_B_devAddrs, K, d_C_devAddrs, N, d_D_devAddrs, N, epilogue, Batch
+    };
+    cutlass::Status status = compute_op.can_implement(args);
+    if (status != cutlass::Status::kSuccess) {
+        printf("%s\n", cutlass::cutlassGetStatusString(status));
+        exit(-1);
+    }
+    // 所需的工作空间
+    size_t workspace_bytes = compute_op.get_workspace_size(args);
+    cutlass::device_memory::allocation<uint8_t> workspace(workspace_bytes);
+    // 调用方式之一
+    // status = compute_op.initialize(args, workspace.get());
+    // status = compute_op.run(nullptr);
+    // 调用方式之二，实际上是operator()内部先调用initialize()方法再调用run()方法
+    compute_op(args, workspace.get(), nullptr);
+    // 释放所分配的工作空间
+    workspace.reset();
+
+    host_gemm<float, row_major, float, col_major, float, row_major>(h_A, h_B, h_C, h_D, alpha, beta, M, N, K, Batch);
+    cudaMemcpy(ret_D, d_D, sizeof(float) * M * N, cudaMemcpyDeviceToHost);
+    check_same<float>(h_D, ret_D,  M * N, 1.e-4);
+    free_memory(
+        17, h_A, h_B, h_C, h_D, d_A, d_B, d_C, d_D, ret_D, 
+        h_A_devAddrs, h_B_devAddrs, h_C_devAddrs, h_D_devAddrs,
+        d_A_devAddrs, d_B_devAddrs, d_C_devAddrs, d_D_devAddrs
     );
-    cudaMemcpy(ret_C, d_C, sizeof(float) * Batch * M * N, cudaMemcpyDeviceToHost);
-
-    host_gemm<float, col_major, col_major, col_major>(h_A, h_B, h_C, alpha, beta, M, N, K, Batch);
-    check_same<float>(h_C, ret_C, Batch * M * N, 1e-4);
-
-    free_memory(10, h_A, h_B, h_C, ret_C, d_A, d_B, d_C, dd_A_array, dd_B_array, dd_C_array);
 }
 
+/*
 void demo_gemm_tensor_core() {
     const uint32_t M = (::M + 127) / 128 * 128;
     const uint32_t N = (::N + 127) / 128 * 128;
@@ -185,8 +277,8 @@ void demo_gemm_tensor_core() {
 
 int main(int argc, char *argv[]) {
     demo_gemm();
-    // demo_gemm_batched();
-    // demo_gemm_array();
+    demo_gemm_batched();
+    demo_gemm_array();
     // demo_gemm_tensor_core();
     return 0;
 }
