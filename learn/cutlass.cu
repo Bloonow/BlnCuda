@@ -236,7 +236,6 @@ void demo_gemm_array() {
     );
 }
 
-/*
 void demo_gemm_tensor_core() {
     const uint32_t M = (::M + 127) / 128 * 128;
     const uint32_t N = (::N + 127) / 128 * 128;
@@ -244,41 +243,78 @@ void demo_gemm_tensor_core() {
     cutlass::half_t *h_A = alloc_host_memory<cutlass::half_t>(M * K);
     cutlass::half_t *h_B = alloc_host_memory<cutlass::half_t>(K * N);
     float *h_C = alloc_host_memory<float>(M * N);
-    float *ret_C = alloc_host_memory<float>(M * N);
+    float *h_D = alloc_host_memory<float>(M * N);
     cutlass::half_t *d_A = alloc_cuda_memory<cutlass::half_t>(M * K, h_A);
     cutlass::half_t *d_B = alloc_cuda_memory<cutlass::half_t>(K * N, h_B);
     float *d_C = alloc_cuda_memory<float>(M * N, h_C);
+    float *d_D = alloc_cuda_memory<float>(M * N, h_D);
+    float *ret_D = alloc_host_memory<float>(M * N);
 
-    // 对于TensorCore实现而言，通常使用128/sizeof_bits<Type>::value作为对齐值，因为通常会使用uint4进行向量化访存
-
-    using ThreadblockShape = cutlass::gemm::GemmShape<128, 128, 16>;
-    using WarpShape = cutlass::gemm::GemmShape<64, 64, 16>;
+    // 编译时静态构造的矩阵乘法类
+    using ElementA = cutlass::half_t; using LayoutA = cutlass::layout::RowMajor;
+    using ElementB = cutlass::half_t; using LayoutB = cutlass::layout::ColumnMajor;
+    using ElementC = float;           using LayoutC = cutlass::layout::RowMajor;
+    using ElementAccumulator = float;
+    using OperatorClass = cutlass::arch::OpClassTensorOp;
+    using ArchTag = cutlass::arch::Sm75;
+    using ThreadblockShape = cutlass::gemm::GemmShape<128, 256, 32>;
+    using WarpShape = cutlass::gemm::GemmShape<64, 64, 32>;
     using InstructionShape = cutlass::gemm::GemmShape<16, 8, 8>;
-    using GemmTensorCore = cutlass::gemm::device::Gemm<
-        cutlass::half_t, cutlass::layout::RowMajor,
-        cutlass::half_t, cutlass::layout::ColumnMajor,
-        float, cutlass::layout::RowMajor,
-        float, cutlass::arch::OpClassTensorOp, cutlass::arch::Sm80,
-        ThreadblockShape, WarpShape, InstructionShape
+    // 对于TensorCore实现而言，通常使用128/sizeof_bits<Type>::value作为对齐值，因为通常会使用uint4进行向量化访存
+    using EpilogueOutputOp = cutlass::epilogue::thread::LinearCombination<
+        ElementC, 128 / cutlass::sizeof_bits<ElementC>::value, ElementAccumulator, ElementAccumulator
     >;
-    GemmTensorCore gemm_tensor_core_op;
-    cutlass::Status stat = gemm_tensor_core_op(
-        {{M, N, K}, {d_A, K}, {d_B, K}, {d_C, N}, {d_C, N}, {alpha, beta}}
+    using ThreadblockSwizzle = cutlass::gemm::threadblock::GemmIdentityThreadblockSwizzle<1>;
+    constexpr int Stages = 2;
+    constexpr int AlignmentA = 128 / cutlass::sizeof_bits<ElementA>::value;
+    constexpr int AlignmentB = 128 / cutlass::sizeof_bits<ElementB>::value;
+    constexpr bool SplitKSerial = false;
+    using Operator = cutlass::arch::OpMultiplyAdd;
+    using GemmTensorCore = cutlass::gemm::device::Gemm<
+        ElementA, LayoutA, ElementB, LayoutB, ElementC, LayoutC, ElementAccumulator, OperatorClass, ArchTag,
+        ThreadblockShape, WarpShape, InstructionShape, EpilogueOutputOp, ThreadblockSwizzle,
+        Stages, AlignmentA, AlignmentB, SplitKSerial, Operator
+    >;
+    // 矩阵乘法类的实例对象
+    GemmTensorCore compute_op;
+    // 所需要的参数，执行时动态构造
+    cutlass::gemm::GemmCoord problem_size = { M, N, K };
+    cutlass::TensorRef<const ElementA, LayoutA> ref_A = { d_A, K };
+    cutlass::TensorRef<const ElementB, LayoutB> ref_B = { d_B, K };
+    cutlass::TensorRef<const ElementC, LayoutC> ref_C = { d_C, N };
+    cutlass::TensorRef<ElementAccumulator, LayoutC> ref_D = { d_D, N };
+    EpilogueOutputOp::Params epilogue = { alpha, beta };
+    GemmTensorCore::Arguments args = {
+        problem_size, ref_A, ref_B, ref_C, ref_D, epilogue
+    };
+    cutlass::Status status = compute_op.can_implement(args);
+    if (status != cutlass::Status::kSuccess) {
+        printf("%s\n", cutlass::cutlassGetStatusString(status));
+        exit(-1);
+    }
+    // 所需的工作空间
+    size_t workspace_bytes = compute_op.get_workspace_size(args);
+    cutlass::device_memory::allocation<uint8_t> workspace(workspace_bytes);
+    // 调用方式之一
+    // status = compute_op.initialize(args, workspace.get());
+    // status = compute_op.run(nullptr);
+    // 调用方式之二，实际上是operator()内部先调用initialize()方法再调用run()方法
+    compute_op(args, workspace.get(), nullptr);
+    // 释放所分配的工作空间
+    workspace.reset();
+
+    host_gemm<cutlass::half_t, row_major, cutlass::half_t, col_major, float, row_major>(
+        h_A, h_B, h_C, h_D, alpha, beta, M, N, K, 1
     );
-    cudaMemcpy(ret_C, d_C, sizeof(float) * M * N, cudaMemcpyDeviceToHost);
-
-    host_gemm<row_major, col_major, row_major>(h_A, h_B, h_C, alpha, beta, M, N, K, 1);
-    check_same<float>(h_C, ret_C, M * N, 1.e-4);
-
-    free_memory(7, h_A, h_B, h_C, ret_C, d_A, d_B, d_C);
+    cudaMemcpy(ret_D, d_D, sizeof(float) * M * N, cudaMemcpyDeviceToHost);
+    check_same<float>(h_D, ret_D,  M * N, 1.e-3);
+    free_memory(9, h_A, h_B, h_C, h_D, d_A, d_B, d_C, d_D, ret_D);
 }
-
-*/
 
 int main(int argc, char *argv[]) {
     demo_gemm();
     demo_gemm_batched();
     demo_gemm_array();
-    // demo_gemm_tensor_core();
+    demo_gemm_tensor_core();
     return 0;
 }
