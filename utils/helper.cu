@@ -59,7 +59,6 @@ bool check_same(Ty *ptr1, Ty *ptr2, uint32_t count, Ty error = 1e-5) {
 // Tags
 struct row_major;
 struct col_major;
-
 template<typename Ty, typename layout> struct Accessor;
 template<typename Ty>
 struct Accessor<Ty, row_major> {
@@ -79,7 +78,6 @@ struct Accessor<Ty, col_major> {
         return data[bid * rows * cols + cid * rows + rid];
     }
 };
-
 template<typename Ty>
 struct VectorAccessor {
     Ty* data;
@@ -89,7 +87,6 @@ struct VectorAccessor {
         return data[bid * stride + idx];
     }
 };
-
 
 template<typename A_type, typename A_layout, typename acc_type = A_type>
 void host_gemv(

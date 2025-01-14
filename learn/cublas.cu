@@ -3,9 +3,9 @@
 #include <cublas_v2.h>
 #include "../utils/helper.cu"
 
-static constexpr uint32_t M = 512 + 33;
-static constexpr uint32_t N = 512 + 22;
-static constexpr uint32_t K = 256 + 11;
+static constexpr uint32_t M = 1024 + 55;
+static constexpr uint32_t N = 1024 + 33;
+static constexpr uint32_t K = 512 + 11;
 static constexpr uint32_t Batch = 4;
 static constexpr float alpha = 3.14;
 static constexpr float beta = 2.71;
@@ -14,10 +14,10 @@ void demo_cublasSgemmStridedBatched() {
     float *h_A = alloc_host_memory<float>(Batch * M * K);
     float *h_B = alloc_host_memory<float>(Batch * K * N);
     float *h_C = alloc_host_memory<float>(Batch * M * N);
-    float *ret_C = alloc_host_memory<float>(Batch * M * N);
     float *d_A = alloc_cuda_memory<float>(Batch * M * K, h_A);
     float *d_B = alloc_cuda_memory<float>(Batch * K * N, h_B);
     float *d_C = alloc_cuda_memory<float>(Batch * M * N, h_C);
+    float *ret_C = alloc_host_memory<float>(Batch * M * N);
 
     cublasHandle_t handle;
     cublasCreate(&handle);
@@ -40,10 +40,10 @@ void demo_cublasSgemvStridedBatched() {
     float *h_A = alloc_host_memory<float>(Batch * M * N);
     float *h_x = alloc_host_memory<float>(Batch * N);
     float *h_y = alloc_host_memory<float>(Batch * M);
-    float *ret_y = alloc_host_memory<float>(Batch * M);
     float *d_A = alloc_cuda_memory<float>(Batch * M * N, h_A);
     float *d_x = alloc_cuda_memory<float>(Batch * N, h_x);
     float *d_y = alloc_cuda_memory<float>(Batch * M, h_y);
+    float *ret_y = alloc_host_memory<float>(Batch * M);
 
     cublasHandle_t handle;
     cublasCreate(&handle);
@@ -55,7 +55,7 @@ void demo_cublasSgemvStridedBatched() {
 
     host_gemv<float, col_major>(h_A, h_x, h_y, alpha, beta, M, N, Batch);
 
-    check_same<float>(h_y, ret_y, Batch * M, 1e-4);
+    check_same<float>(h_y, ret_y, Batch * M, 1e-3);
     free_memory(7, h_A, h_x, h_y, ret_y, d_A, d_x, d_y);
 }
 

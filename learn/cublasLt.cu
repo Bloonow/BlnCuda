@@ -4,8 +4,8 @@
 #include "../utils/helper.cu"
 
 int main(int argc, char *argv[]) {
-    int64_t M = 456, N = 987, K = 543;
     int32_t Batch = 4;
+    int64_t M = 1024 + 55, N = 1024 + 33, K = 512 + 11;
     uint64_t workspace_bytes = 16 * 1024 * 1024;
     float alpha = 3.14, beta = 2.71;
     float *h_A = alloc_host_memory<float>(Batch * M * K);
@@ -13,12 +13,12 @@ int main(int argc, char *argv[]) {
     float *h_C = alloc_host_memory<float>(Batch * M * N);
     float *h_D = alloc_host_memory<float>(Batch * M * N);
     float *h_bias = alloc_host_memory<float>(Batch * M);
-    float *ret_D = alloc_host_memory<float>(Batch * M * N);
     float *d_A = alloc_cuda_memory<float>(Batch * M * K, h_A);
     float *d_B = alloc_cuda_memory<float>(Batch * K * N, h_B);
     float *d_C = alloc_cuda_memory<float>(Batch * M * N, h_C);
     float *d_D = alloc_cuda_memory<float>(Batch * M * N, h_D);
     float *d_bias = alloc_cuda_memory<float>(Batch * M, h_bias);
+    float *ret_D = alloc_host_memory<float>(Batch * M * N);
     int64_t bitmask_ld = (M + 127) / 128 * 128;
     char *bitmask = alloc_cuda_memory<char>(Batch * N * bitmask_ld / (8 * sizeof(char)), nullptr);
     void *workspace = alloc_cuda_memory<char>(workspace_bytes / sizeof(char), nullptr);

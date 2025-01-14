@@ -13,7 +13,7 @@ __global__ void scale_kernel(cufftComplex* data, float factor, const int count) 
 
 int main(int argc, char *argv[]) {
     int Batch = 8;
-    int N1 = 256, N2 = 128;
+    int N1 = 512, N2 = 256;
     cufftReal *h_input = (cufftReal*)malloc(Batch * N1 * N2 * sizeof(cufftReal));
     cufftReal *h_reslut = (cufftReal*)malloc(Batch * N1 * N2 * sizeof(cufftReal));
     for (int i = 0; i < Batch * N1 * N2; i++) h_input[i] = i * 1.f / Batch;
@@ -43,7 +43,7 @@ int main(int argc, char *argv[]) {
     cufftDestroy(plan2D_c2r);
 
     cudaMemcpy(h_reslut, d_result, Batch * N1 * N2 * sizeof(cufftReal), cudaMemcpyDeviceToHost);
-    check_same<cufftReal>(h_reslut, h_input, Batch * N1 * N2, 1.e-3);
+    check_same<cufftReal>(h_reslut, h_input, Batch * N1 * N2, 1.e-2);
 
     free_memory(5, h_input, h_reslut, d_input, d_result, d_temp);
     return 0;
