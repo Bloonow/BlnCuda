@@ -260,7 +260,7 @@ void demo_gemm_tensor_core() {
     using ThreadblockShape = cutlass::gemm::GemmShape<128, 256, 32>;
     using WarpShape = cutlass::gemm::GemmShape<64, 64, 32>;
     using InstructionShape = cutlass::gemm::GemmShape<16, 8, 8>;
-    // 对于TensorCore实现而言，通常使用128/sizeof_bits<Type>::value作为对齐值，因为通常会使用uint4进行向量化访存
+    // 对于TensorCore实现而言，通常使用128/sizeof_bits<Type>::value作为对齐值，即连续多少个元素
     using EpilogueOutputOp = cutlass::epilogue::thread::LinearCombination<
         ElementC, 128 / cutlass::sizeof_bits<ElementC>::value, ElementAccumulator, ElementAccumulator
     >;
