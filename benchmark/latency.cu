@@ -27,21 +27,20 @@
  *   该问题无法彻底避免，只能通过在正式测试之前，多执行几遍相同的指令，以期望将指令缓存到L1指令Cache当中。
  */
 
- // #pragma once
+#pragma once
 
-#include <cstdio>
 #include <cuda.h>
 
 namespace benchmark {
 
 namespace dram_latency {
 __global__ void flush_l2cache_kernel(const uint32_t* array, uint32_t* dummy) {
-    const uint32_t warp_idx = threadIdx.x / 32;
-    const uint32_t lane_idx = threadIdx.x % 32;
+    const int warp_idx = threadIdx.x / 32;
+    const int lane_idx = threadIdx.x % 32;
     const uint32_t* warp_ptr = array + blockIdx.x * blockDim.x + warp_idx * 32;
     uint32_t sum = 0;
     #pragma unroll
-    for (uint32_t i = 0; i < 32; ++i) {
+    for (int i = 0; i < 32; ++i) {
         const uint32_t* ldg_ptr = warp_ptr + (lane_idx ^ i);  // 蝶形交错
         asm volatile (
             "{\n"
@@ -57,14 +56,13 @@ __global__ void flush_l2cache_kernel(const uint32_t* array, uint32_t* dummy) {
 }
 
 __host__ void flush_l2cache() {
-    const uint32_t l2cache_flush_bytes = (1u << 20) * 128;  // 用于刷新L2缓存的数据，128MiB
-    const uint32_t l2cache_flush_data_num = l2cache_flush_bytes / sizeof(uint32_t);
+    const size_t l2cache_flush_bytes = (1u << 20) * 128;  // 用于刷新L2缓存的数据，128MiB
+    const size_t l2cache_flush_data_num = l2cache_flush_bytes / sizeof(uint32_t);
     uint32_t *array, *dummy;
     cudaMalloc(&array, l2cache_flush_bytes);
-    cudaMalloc(&dummy, 32 * sizeof(uint32_t));
+    cudaMalloc(&dummy, 128 * sizeof(uint32_t));
     cudaMemset(array, 0, l2cache_flush_bytes);
-    const uint32_t kBlockSize = 128;
-    flush_l2cache_kernel<<<l2cache_flush_data_num / kBlockSize, kBlockSize>>>(array, dummy);
+    flush_l2cache_kernel<<<l2cache_flush_data_num / 128, 128>>>(array, dummy);
     cudaFree(array);
     cudaFree(dummy);
 }
@@ -99,7 +97,7 @@ __global__ void dram_latency_kernel(const uint32_t* array, uint32_t* dummy, uint
         : "memory"
     );
     #pragma unroll
-    for (uint32_t i = 0; i < Round; ++i) {
+    for (int i = 0; i < Round; ++i) {
         // 下一次访问的地址，依赖于当前访问读取的值；值得注意的是，IADD延迟远小于要测试的延迟，可以忽略不记
         value = ldg_cg(ldg_ptr);
         ldg_ptr += value;
@@ -122,10 +120,10 @@ template <int Round = 100, int Warmup = 100>
 __host__ uint32_t dram_latency() {
     // 一个线程块中32个线程，一个线程一次访问一个4字节的uint32_t类型元素，于是，一个线程块一次性访问128字节
     // 一个线程的两个相邻的ldg指令所访问的地址之间的间隔，应该大于L2Cache的缓存行（128字节）
-    const uint32_t stride_bytes = 1024u;
-    const uint32_t stride_num = stride_bytes / sizeof(uint32_t);
-    const uint32_t data_bytes = (Round + 1) * stride_bytes;
-    const uint32_t data_num = data_bytes / sizeof(uint32_t);
+    const size_t stride_bytes = 1024u;
+    const size_t stride_num = stride_bytes / sizeof(uint32_t);
+    const size_t data_bytes = (Round + 1) * stride_bytes;
+    const size_t data_num = data_bytes / sizeof(uint32_t);
     static_assert(stride_bytes >= 32 * sizeof(uint32_t) && stride_bytes % sizeof(uint32_t) == 0, "stride_bytes is invalid");
 
     uint32_t *array, *dummy, *clock;
@@ -134,20 +132,20 @@ __host__ uint32_t dram_latency() {
     cudaMalloc(&clock, 32 * sizeof(uint32_t));
     uint32_t *h_array;
     cudaMallocHost(&h_array, data_bytes);
-    for (uint32_t i = 0; i < data_num; ++i) {
+    for (int i = 0; i < data_num; ++i) {
         h_array[i] = stride_num;
     }
     cudaMemcpy(array, h_array, data_bytes, cudaMemcpyHostToDevice);
 
     // 预热，以期望将指令缓存到L1指令Cache当中
-    for (int i = 0; i < Warmup; ++i){
+    for (int i = 0; i < Warmup; ++i) {
         dram_latency_kernel<Round><<<1, 32>>>(array, dummy, clock);
     }
     // 刷新L2缓存
     flush_l2cache();
     // 测试设备全局内存的延迟
     dram_latency_kernel<Round><<<1, 32>>>(array, dummy, clock);
-    
+
     uint32_t h_clock[32];
     cudaMemcpy(h_clock, clock, 32 * sizeof(uint32_t), cudaMemcpyDeviceToHost);
 
@@ -161,7 +159,7 @@ __host__ uint32_t dram_latency() {
 }  // namespace dram_latency
 
 namespace smem_latency {
-__device__ uint32_t cvta_smem_addr(const void* smem_ptr) {
+__device__ __forceinline__ uint32_t cvta_smem_addr(const void* smem_ptr) {
     uint32_t smem_addr;
     asm volatile (
         "{\n"
@@ -179,10 +177,9 @@ template <int Round>
 __launch_bounds__(16, 1)  /* 一个SM执行最多1个线程块，一个线程块最多16个线程 */
 __global__ void smem_latency_kernel(const uint32_t* array, uint32_t* dummy, uint32_t* clock) {
     __shared__ uint32_t smem_buffer[16];
-    smem_buffer[threadIdx.x] = array[threadIdx.x];
-    __syncthreads();
-
     uint32_t smem_addr = cvta_smem_addr(smem_buffer + threadIdx.x);  // 使用.shared存储状态空间中的相对地址
+    smem_buffer[threadIdx.x] = array[threadIdx.x];                   // smem_buffer[i]存储的是自己本身的地址
+    __syncthreads();
 
     uint32_t start, stop;
     asm volatile (
@@ -225,13 +222,13 @@ __host__ uint32_t smem_latency() {
     cudaMalloc(&clock, 16 * sizeof(uint32_t));
     uint32_t *h_array;
     cudaMallocHost(&h_array, 16 * sizeof(uint32_t));
-    for (uint32_t i = 0; i < 16; ++i) {
+    for (int i = 0; i < 16; ++i) {
         h_array[i] = i * sizeof(uint32_t);
     }
     cudaMemcpy(array, h_array, 16 * sizeof(uint32_t), cudaMemcpyHostToDevice);
 
     // 预热，以期望将指令缓存到L1指令Cache当中
-    for (int i = 0; i < Warmup; ++i){
+    for (int i = 0; i < Warmup; ++i) {
         smem_latency_kernel<Round><<<1, 16>>>(array, dummy, clock);
     }
     // 测试共享内存的延迟
@@ -303,10 +300,10 @@ template <int Round = 100, int Warmup = 100>
 __host__ uint32_t l2cache_latency() {
     // 一个线程块中32个线程，一个线程一次访问一个4字节的uint32_t类型元素，于是，一个线程块一次性访问128字节
     // 一个线程的两个相邻的ldg指令所访问的地址之间的间隔，应该大于L2Cache的缓存行（128字节）
-    const uint32_t stride_bytes = 128u;
-    const uint32_t stride_num = stride_bytes / sizeof(uint32_t);
-    const uint32_t data_bytes = (Round + 1) * stride_bytes;
-    const uint32_t data_num = data_bytes / sizeof(uint32_t);
+    const size_t stride_bytes = 128u;
+    const size_t stride_num = stride_bytes / sizeof(uint32_t);
+    const size_t data_bytes = (Round + 1) * stride_bytes;
+    const size_t data_num = data_bytes / sizeof(uint32_t);
     static_assert(stride_bytes >= 32 * sizeof(uint32_t) && stride_bytes % sizeof(uint32_t) == 0, "stride_bytes is invalid");
 
     uint32_t *array, *dummy, *clock;
@@ -315,18 +312,18 @@ __host__ uint32_t l2cache_latency() {
     cudaMalloc(&clock, 32 * sizeof(uint32_t));
     uint32_t *h_array;
     cudaMallocHost(&h_array, data_bytes);
-    for (uint32_t i = 0; i < data_num; ++i) {
+    for (int i = 0; i < data_num; ++i) {
         h_array[i] = stride_num;
     }
     cudaMemcpy(array, h_array, data_bytes, cudaMemcpyHostToDevice);
 
     // 预热，以期望将指令缓存到L1指令Cache当中
-    for (int i = 0; i < Warmup; ++i){
+    for (int i = 0; i < Warmup; ++i) {
         l2cache_latency_kernel<Round><<<1, 32>>>(array, dummy, clock);
     }
     // 测试L2缓存的延迟
     l2cache_latency_kernel<Round><<<1, 32>>>(array, dummy, clock);
-    
+
     uint32_t h_clock[32];
     cudaMemcpy(h_clock, clock, 32 * sizeof(uint32_t), cudaMemcpyDeviceToHost);
 
@@ -346,7 +343,7 @@ template <int Round>
 __launch_bounds__(4, 1)  /* 一个SM执行最多1个线程块，一个线程块最多4个线程 */
 __global__ void l1cache_latency_kernel(ptr_t* array, ptr_t* dummy, uint32_t* clock) {
     ptr_t* ldg_ptr = array + threadIdx.x;
-    
+
     // 下一次访问的地址，依赖于当前访问读取的值
     for (int i = 0; i < Round; ++i) {
         asm volatile (
@@ -400,11 +397,11 @@ __host__ uint32_t l1cache_latency() {
     ptr_t *h_array;
     cudaMallocHost(&h_array, 4 * sizeof(ptr_t));
     for (int i = 0; i < 4; ++i) {
-        h_array[i] = array + i;  
+        h_array[i] = array + i;
     }
     cudaMemcpy(array, h_array, 4 * sizeof(ptr_t), cudaMemcpyHostToDevice);  // array[i]存储的是自己本身的地址
 
-    // 预热，占用指令Cache
+    // 预热，以期望将指令缓存到L1指令Cache当中
     for (int i = 0; i < Warmup; ++i) {
         l1cache_latency_kernel<Round><<<1, 4>>>(array, dummy, clock);
     }
@@ -428,10 +425,8 @@ struct Latency {
     uint32_t smem_latency;
     uint32_t l2cache_latency;
     uint32_t l1cache_latency;
-    Latency() : dram_latency(0), smem_latency(0), l2cache_latency(0), l1cache_latency(0) {
-        this->obtain();
-    }
-    
+    Latency() { this->obtain(); }
+
     void obtain() {
         dram_latency = benchmark::dram_latency::dram_latency();
         smem_latency = benchmark::smem_latency::smem_latency();
@@ -441,12 +436,3 @@ struct Latency {
 };
 
 }  // namespace benchmark
-
-int main(int argc, char* argv[]) {
-    benchmark::Latency latency;
-    printf("DRAM latency: %u cycle\n", latency.dram_latency);
-    printf("SMEM latency: %u cycle\n", latency.smem_latency);
-    printf("L2 cache latency: %u cycle\n", latency.l2cache_latency);
-    printf("L1 cache latency: %u cycle\n", latency.l1cache_latency);
-    return 0;
-}
